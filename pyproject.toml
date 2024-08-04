@@ -7,6 +7,8 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.10"
+swebench = "2.0.12"
+modal = "^0.64.4"
 
 
 [build-system]
