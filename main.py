@@ -2,6 +2,12 @@ import modal
 from modal import Image, Mount
 import json
 import random
+from swebench.harness.run_evaluation import main as swebench_main
+import os
+import sys
+import argparse
+import inspect
+import jsonlines
 
 app = modal.App("distributed-swebench")
 
@@ -17,7 +23,7 @@ mount = Mount.from_local_dir(".", remote_path="/root/app")
 
 @app.function(image=custom_image, mounts=[mount], cpu=2, memory=4096)
 def run_shard(shard, predictions_path, run_id, workers=4):
-    results = mock_swebench_main(predictions_path, run_id, workers, shard)
+    results = run_swebench(predictions_path, run_id, workers, shard)
     return results
 
 @app.function(image=custom_image, mounts=[mount])
@@ -31,11 +37,36 @@ def main(predictions_path: str, run_id: str, num_shards: int = 10, workers_per_s
     print(f"Processing completed for run_id: {run_id}")
     return combined_results
 
-def mock_swebench_main(predictions_path, run_id, workers, shard):
+def run_swebench(predictions_path, run_id, workers, shard):
     print(f"Processing shard {shard['shard_id']} with {workers} workers")
+
+    shard_predictions_path = f"/tmp/shard_{shard['shard_id']}.jsonl"
+    
+    os.makedirs(os.path.dirname(shard_predictions_path), exist_ok=True)
+    with jsonlines.open(shard_predictions_path, mode='w') as writer:
+        writer.write_all(shard['data'])
+    
+    try:
+        swebench_results = swebench_main(
+            dataset_name="princeton-nlp/SWE-bench_Lite",
+            split="test",
+            instance_ids=None,
+            predictions_path=shard_predictions_path,
+            max_workers=workers,
+            open_file_limit=4096,
+            timeout=1800,
+            force_rebuild=False,
+            cache_level="env",
+            clean=False,
+            run_id=f"{run_id}_shard_{shard['shard_id']}"
+        )
+    except Exception as e:
+        print(f"Error occurred: {e}")
+        swebench_results = None
+    
     return {
         "shard_id": shard["shard_id"],
-        "processed_data": [x * 2 for x in shard["data"]],
+        "swebench_results": swebench_results,
         "metadata": {
             "predictions_path": predictions_path,
             "run_id": run_id,
@@ -45,11 +76,21 @@ def mock_swebench_main(predictions_path, run_id, workers, shard):
 
 def create_shards(predictions_path, num_shards):
     print(f"Creating {num_shards} shards from {predictions_path}")
+    with jsonlines.open(predictions_path) as reader:
+        data = list(reader)
+
+    print(f"Data length: {len(data)}")
+    print("data:")
+    print(data)
+    
+    shard_size = len(data) // num_shards
     shards = []
     for i in range(num_shards):
+        start = i * shard_size
+        end = start + shard_size if i < num_shards - 1 else len(data)
         shard = {
             "shard_id": i,
-            "data": [random.randint(1, 100) for _ in range(10)]  # 10 random numbers per shard
+            "data": data[start:end]
         }
         shards.append(shard)
     return shards
@@ -63,7 +104,7 @@ def combine_results(results):
 
 @app.local_entrypoint()
 def run_and_save():
-    predictions_path = "~/Downloads/all_preds.jsonl"
+    predictions_path = "/root/app/20240623_moatless_claude-3.5-sonnet_all_preds.jsonl"
     run_id = "test_run"
     num_shards = 10
     workers_per_shard = 4
@@ -77,4 +118,10 @@ def run_and_save():
     print(f"Combined results written to {output_file}")
 
 if __name__ == "__main__":
-    modal.runner.deploy_app(app)
+    # This block will only run when the script is executed directly (not imported)
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "local_debug":
+        from debug_local import main as debug_main
+        debug_main()
+    else:
+        modal.runner.deploy_app(app)

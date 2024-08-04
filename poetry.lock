@@ -828,6 +828,20 @@ files = [
 ]
 
 [[package]]
+name = "jsonlines"
+version = "4.0.0"
+description = "Library with helpers for the jsonlines file format"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "jsonlines-4.0.0-py3-none-any.whl", hash = "sha256:185b334ff2ca5a91362993f42e83588a360cf95ce4b71a73548502bda52a7c55"},
+    {file = "jsonlines-4.0.0.tar.gz", hash = "sha256:0c6d2c09117550c089995247f605ae4cf77dd1533041d366351f6f298822ea74"},
+]
+
+[package.dependencies]
+attrs = ">=19.2.0"
+
+[[package]]
 name = "markdown-it-py"
 version = "3.0.0"
 description = "Python port of markdown-it. Markdown parsing, done right!"
@@ -1681,10 +1695,8 @@ version = "2.0.12"
 description = "The official SWE-bench package - a benchmark for evaluating LMs on software engineering"
 optional = false
 python-versions = ">=3.8"
-files = [
-    {file = "swebench-2.0.12-py3-none-any.whl", hash = "sha256:7633f6a81c3db35a02312d53b2818947cdd4b7acdb6a0fbafb229512b3f742c4"},
-    {file = "swebench-2.0.12.tar.gz", hash = "sha256:7d3de2acf46351f774aec916b4646b3267137fc73d8e7e03f8d2a8b06a758f85"},
-]
+files = []
+develop = false
 
 [package.dependencies]
 beautifulsoup4 = "*"
@@ -1702,6 +1714,12 @@ unidiff = "*"
 
 [package.extras]
 inference = ["anthropic", "flash-attn", "jedi", "openai", "peft", "protobuf", "sentencepiece", "tenacity", "tiktoken", "torch", "transformers", "triton"]
+
+[package.source]
+type = "git"
+url = "https://github.com/princeton-nlp/SWE-bench.git"
+reference = "HEAD"
+resolved_reference = "c2b3cefd4a5af0b248966a773650a39046072975"
 
 [[package]]
 name = "synchronicity"
@@ -2167,4 +2185,4 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "ec5e594bc0775c5ef84120d63d7ea962ac80338eb6fde8ce459606bed0fedf39"
+content-hash = "d710b6e72f31d22f4d57d950377500d57dd53fedba86ad9d42607f60f9f2107e"

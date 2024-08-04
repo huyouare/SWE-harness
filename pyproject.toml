@@ -7,8 +7,9 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-swebench = "2.0.12"
+swebench = {git = "https://github.com/princeton-nlp/SWE-bench.git"}
 modal = "^0.64.4"
+jsonlines = "^4.0.0"
 
 
 [build-system]
