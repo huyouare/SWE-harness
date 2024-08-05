@@ -10,8 +10,25 @@ python = "^3.10"
 swebench = {git = "https://github.com/princeton-nlp/SWE-bench.git"}
 modal = "^0.64.4"
 jsonlines = "^4.0.0"
+docker = "^7.1.0"
 
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.8.0"
+flake8 = "^7.1.1"
+isort = "^5.13.2"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ['py310']
+
+[tool.isort]
+profile = "black"
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = "E203"
