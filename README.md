@@ -4,14 +4,26 @@
 
 We are using Python 3.10
 
-Install poetry and then run:
+### Installation on EC2 (Ubuntu)
 
+Install pyenv and Python 3.10: https://ericsysmin.com/2024/01/11/how-to-install-pyenv-on-ubuntu-22-04/
+
+Then install and run Poetry:
 ```bash
-poetry install
+sudo apt install python3-poetry
+poetry install --no-root
 poetry shell
 ```
 
-## Running
+### Installation on personal machine (Mac)
+Install poetry and then run:
+
+```bash
+poetry install --no-root
+poetry shell
+```
+
+## Running (outdated)
 
 ```bash
 # Deploy the script to Modal and run the remote job
