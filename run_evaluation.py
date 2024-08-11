@@ -56,42 +56,28 @@ class EvaluationError(Exception):
 def run_instance(
     test_spec: TestSpec,
     pred: dict,
-    rm_image: bool,
-    force_rebuild: bool,
+    rm_container: bool,
     client: docker.DockerClient,
     run_id: str,
     timeout: int | None = None,
 ):
     """
-    Run a single instance with the given prediction.
+    Run a single instance with the given prediction using a pre-built DockerHub image.
 
     Args:
         test_spec (TestSpec): TestSpec instance
         pred (dict): Prediction w/ model_name_or_path, model_patch, instance_id
-        rm_image (bool): Whether to remove the image after running
-        force_rebuild (bool): Whether to force rebuild the image
+        rm_container (bool): Whether to remove the container after running
         client (docker.DockerClient): Docker client
         run_id (str): Run ID
         timeout (int): Timeout for running tests
     """
+    # print(f"Running instance {test_spec.instance_id}...")
     # Set up logging directory
     instance_id = test_spec.instance_id
     model_name_or_path = pred.get("model_name_or_path", "None").replace("/", "__")
     log_dir = RUN_EVALUATION_LOG_DIR / run_id / model_name_or_path / instance_id
     log_dir.mkdir(parents=True, exist_ok=True)
-
-    # Link the image build dir in the log dir
-    build_dir = INSTANCE_IMAGE_BUILD_DIR / test_spec.instance_image_key.replace(
-        ":", "__"
-    )
-    image_build_link = log_dir / "image_build_dir"
-    if not image_build_link.exists():
-        try:
-            # link the image build dir in the log dir
-            image_build_link.symlink_to(build_dir.absolute(), target_is_directory=True)
-        except:
-            # some error, idk why
-            pass
     log_file = log_dir / "run_instance.log"
 
     # Set up report file + logger
@@ -100,15 +86,34 @@ def run_instance(
         return instance_id, json.loads(report_path.read_text())
     logger = setup_logger(instance_id, log_file)
 
+    print(f"Running instance {instance_id}...")
     # Run the instance
     container = None
     try:
-        # Build + start instance container (instance image should already be built)
-        container = build_container(
-            test_spec, client, run_id, logger, rm_image, force_rebuild
+        # Pull the pre-built image from DockerHub
+        image_name = f"huyouare/swebench-lite:sweb.eval.x86_64.{test_spec.instance_id}"
+        print(f"Pulling image {image_name} from DockerHub...")
+        logger.info(f"Pulling image {image_name} from DockerHub...")
+        client.images.pull(image_name)
+        logger.info(f"Image {image_name} pulled successfully")
+        print(f"Image {image_name} pulled successfully")
+        # Create and start the container
+        container = client.containers.run(
+            image_name,
+            detach=True,
+            name=f"sweb.eval.x86_64.{instance_id}",
+            remove=rm_container,
         )
-        container.start()
         logger.info(f"Container for {instance_id} started: {container.id}")
+        print(f"Container for {instance_id} started: {container.id}")
+
+        print("Listing root directory of the container:")
+        exec_result = container.exec_run("ls -la /")
+        print(exec_result.output.decode())
+
+        print("Checking if /tmp exists:")
+        exec_result = container.exec_run("ls -la /tmp")
+        print(exec_result.output.decode())
 
         # Copy model prediction as patch file to container
         patch_file = Path(log_dir / "patch.diff")
@@ -116,8 +121,12 @@ def run_instance(
         logger.info(
             f"Intermediate patch for {instance_id} written to {patch_file}, now applying to container..."
         )
+        print(
+            f"Intermediate patch for {instance_id} written to {patch_file}, now applying to container..."
+        )
         copy_to_container(container, patch_file, Path("/tmp/patch.diff"))
 
+        print(f"Applying patch to container...")
         # Attempt to apply patch to container
         val = container.exec_run(
             "git apply --allow-empty -v /tmp/patch.diff",
@@ -160,6 +169,7 @@ def run_instance(
         )
         copy_to_container(container, eval_file, Path("/eval.sh"))
 
+        print(f"Running eval script...")
         # Run eval script, write output to logs
         test_output, timed_out, total_runtime = exec_run_with_timeout(
             container, "/bin/bash /eval.sh", timeout
@@ -189,6 +199,7 @@ def run_instance(
         if git_diff_output_after != git_diff_output_before:
             logger.info(f"Git diff changed after running eval script")
 
+        print(f"Grading answer for {instance_id}...")
         # Get report from test output
         logger.info(f"Grading answer for {instance_id}...")
         report = get_eval_report(
@@ -224,8 +235,6 @@ def run_instance(
     finally:
         # Remove instance container + image, close logger
         cleanup_container(client, container, logger)
-        if rm_image:
-            remove_image(client, test_spec.instance_image_key, logger)
         close_logger(logger)
     return
 
@@ -285,7 +294,6 @@ def run_instances(
                         clean,
                         existing_images,
                     ),
-                    force_rebuild,
                     client,
                     run_id,
                     timeout,
@@ -571,7 +579,7 @@ def main(
         print("No instances to run.")
     else:
         # build environment images + run instances
-        build_env_images(client, dataset, force_rebuild, max_workers)
+        # build_env_images(client, dataset, force_rebuild, max_workers)
         run_instances(
             predictions,
             dataset,
