@@ -446,7 +446,6 @@ def build_instance_images(
     _, env_failed = build_env_images(
         client, test_specs, force_rebuild, max_workers, use_buildx
     )
-    return
 
     if len(env_failed) > 0:
         # Don't build images for instances that depend on failed-to-build env images
