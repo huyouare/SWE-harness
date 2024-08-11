@@ -6,6 +6,11 @@ We are using Python 3.10
 
 ### Installation on EC2 (Ubuntu)
 
+Install Docker:
+```bash
+sudo apt install docker.io
+```
+
 Install pyenv and Python 3.10: https://ericsysmin.com/2024/01/11/how-to-install-pyenv-on-ubuntu-22-04/
 
 Then install and run Poetry:
