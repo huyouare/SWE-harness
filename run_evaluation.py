@@ -107,6 +107,19 @@ def run_instance(
         logger.info(f"Container for {instance_id} started: {container.id}")
         print(f"Container for {instance_id} started: {container.id}")
 
+        import time
+
+        time.sleep(2)  # Wait for 2 seconds
+        container.reload()
+        print(f"Container status: {container.status}")
+        print(f"Container state: {container.attrs['State']}")
+
+        try:
+            result = container.exec_run("echo 'Container is running'")
+            print(f"Exec result: {result.output.decode()}")
+        except Exception as e:
+            print(f"Exec failed: {str(e)}")
+
         print("Listing root directory of the container:")
         exec_result = container.exec_run("ls -la /")
         print(exec_result.output.decode())
