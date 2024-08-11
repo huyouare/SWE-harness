@@ -535,6 +535,11 @@ def build_and_push(
 
         client = docker.from_env()
 
+        # Check if the image already exists on DockerHub
+        if push_to_registry and image_exists_on_dockerhub(full_image_name):
+            print(f"{full_image_name} already exists on DockerHub, skipping build.")
+            return full_image_name
+
         build_instance_image(
             test_spec=test_spec,
             client=client,
