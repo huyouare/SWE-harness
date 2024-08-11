@@ -9,6 +9,9 @@ from swebench.harness.docker_utils import list_images
 from swebench.harness.test_spec import make_test_spec
 from swebench.harness.utils import load_swebench_dataset, str2bool
 
+# This is only imported so we can monkey patch platform.machine().
+import platform
+
 
 def filter_dataset_to_build(
     dataset: list, instance_ids: list, client: docker.DockerClient, force_rebuild: bool
@@ -55,6 +58,8 @@ def main(
     max_workers,
     force_rebuild,
     open_file_limit,
+    only_x86_64,
+    push_to_registry,
 ):
     """
     Build Docker images for the specified instances.
@@ -64,7 +69,14 @@ def main(
         max_workers (int): Number of workers for parallel processing.
         force_rebuild (bool): Whether to force rebuild all images.
         open_file_limit (int): Open file limit.
+        only_x86_64 (bool): Whether to only build x86_64 images.
+        push_to_registry (bool): Whether to push images to DockerHub registry.
     """
+    if only_x86_64:
+        # TODO: Do something better here.
+        # Monkey patch platform.machine() so that we always build x86_64 images.
+        platform.machine = lambda: "x86_64"
+
     # Set open file limit
     resource.setrlimit(resource.RLIMIT_NOFILE, (open_file_limit, open_file_limit))
     client = docker.from_env()
@@ -108,6 +120,15 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--open_file_limit", type=int, default=8192, help="Open file limit"
+    )
+    parser.add_argument(
+        "--only_x86_64", type=str2bool, default=False, help="Only build x86_64 images"
+    )
+    parser.add_argument(
+        "--push_to_registry",
+        type=str2bool,
+        default=False,
+        help="Push images to DockerHub registry",
     )
     args = parser.parse_args()
     main(**vars(args))
