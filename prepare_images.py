@@ -4,7 +4,7 @@ import resource
 from argparse import ArgumentParser
 
 from swebench.harness.constants import KEY_INSTANCE_ID
-from swebench.harness.docker_build import build_instance_images
+from docker_build import build_instance_images  # Local import
 from swebench.harness.docker_utils import list_images
 from swebench.harness.test_spec import make_test_spec
 from swebench.harness.utils import load_swebench_dataset, str2bool
@@ -60,6 +60,8 @@ def main(
     open_file_limit,
     only_x86_64,
     push_to_registry,
+    dockerhub_username,
+    dockerhub_repo,
 ):
     """
     Build Docker images for the specified instances.
@@ -86,12 +88,21 @@ def main(
     if instance_ids:
         dataset = filter_dataset_to_build(dataset, instance_ids, client, force_rebuild)
 
+    # Construct DockerHub prefix
+    dockerhub_prefix = (
+        f"{dockerhub_username}/{dockerhub_repo}"
+        if dockerhub_username and dockerhub_repo
+        else ""
+    )
+
     # Build images for remaining instances
     successful, failed = build_instance_images(
         client=client,
         dataset=dataset,
         force_rebuild=force_rebuild,
         max_workers=max_workers,
+        dockerhub_prefix=dockerhub_prefix,
+        push_to_registry=push_to_registry,
     )
     print(f"Successfully built {len(successful)} images")
     print(f"Failed to build {len(failed)} images")
@@ -122,13 +133,25 @@ if __name__ == "__main__":
         "--open_file_limit", type=int, default=8192, help="Open file limit"
     )
     parser.add_argument(
-        "--only_x86_64", type=str2bool, default=False, help="Only build x86_64 images"
+        "--only_x86_64", type=str2bool, default=True, help="Only build x86_64 images"
     )
     parser.add_argument(
         "--push_to_registry",
         type=str2bool,
-        default=False,
+        default=True,
         help="Push images to DockerHub registry",
+    )
+    parser.add_argument(
+        "--dockerhub_username",
+        type=str,
+        default="",
+        help="DockerHub username",
+    )
+    parser.add_argument(
+        "--dockerhub_repo",
+        type=str,
+        default="",
+        help="DockerHub repository name",
     )
     args = parser.parse_args()
     main(**vars(args))
