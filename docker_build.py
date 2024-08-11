@@ -558,9 +558,11 @@ def build_and_push(
 def push_to_dockerhub(client, full_image_name):
     try:
         print(f"Now pushing {full_image_name} to DockerHub...")
+        last_status = None
         for line in client.images.push(full_image_name, stream=True, decode=True):
-            if "status" in line:
+            if "status" in line and line["status"] != last_status:
                 print(f"Push status: {line['status']}")
+                last_status = line["status"]
         print(f"Successfully pushed {full_image_name} to DockerHub")
     except Exception as e:
         print(f"Error pushing {full_image_name} to DockerHub: {e}")
