@@ -8,6 +8,8 @@ from pathlib import Path
 import subprocess
 import time
 from datetime import timedelta
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing
 
 from swebench.harness.constants import (
     BASE_IMAGE_BUILD_DIR,
@@ -73,7 +75,6 @@ def build_image(
     setup_scripts: dict,
     dockerfile: str,
     platform: str,
-    client: docker.DockerClient,
     build_dir: Path,
     nocache: bool = False,
     use_buildx: bool = False,
@@ -92,6 +93,8 @@ def build_image(
         use_buildx (bool): Whether to use buildx for cross-platform builds
     """
     start_time = time.time()
+
+    client = docker.from_env()
     # Create a logger for the build process
     logger = setup_logger(image_name, build_dir / "build_image.log")
     logger.info(
@@ -258,7 +261,6 @@ def build_base_images(
             setup_scripts={},
             dockerfile=dockerfile,
             platform=platform,
-            client=client,
             build_dir=BASE_IMAGE_BUILD_DIR / image_name.replace(":", "__"),
             use_buildx=use_buildx,
         )
@@ -356,7 +358,7 @@ def build_env_images(
     with tqdm(
         total=len(configs_to_build), smoothing=0, desc="Building environment images"
     ) as pbar:
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
             # Create a future for each image to build
             futures = {
                 executor.submit(
@@ -365,7 +367,6 @@ def build_env_images(
                     {"setup_env.sh": config["setup_script"]},
                     config["dockerfile"],
                     config["platform"],
-                    client,
                     ENV_IMAGE_BUILD_DIR / image_name.replace(":", "__"),
                     use_buildx=use_buildx,
                 ): image_name
@@ -621,7 +622,6 @@ def build_instance_image(
             },
             dockerfile=dockerfile,
             platform=test_spec.platform,
-            client=client,
             build_dir=build_dir,
             nocache=nocache,
         )
