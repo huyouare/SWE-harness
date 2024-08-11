@@ -103,30 +103,42 @@ def run_instance(
             detach=True,
             name=f"sweb.eval.x86_64.{instance_id}",
             remove=rm_container,
+            command="tail -f /dev/null",  # Keep the container running
         )
-        logger.info(f"Container for {instance_id} started: {container.id}")
-        print(f"Container for {instance_id} started: {container.id}")
+        logger.info(f"Container for {instance_id} created: {container.id}")
+        print(f"Container for {instance_id} created: {container.id}")
 
+        # Immediate status check
+        print(f"Immediate container status: {container.status}")
+
+        # Wait and check status
         import time
 
-        time.sleep(2)  # Wait for 2 seconds
+        time.sleep(2)
         container.reload()
-        print(f"Container status: {container.status}")
-        print(f"Container state: {container.attrs['State']}")
+        print(f"Container status after 2 seconds: {container.status}")
 
+        # Get container logs
+        logs = container.logs().decode()
+        print(f"Container logs:\n{logs}")
+
+        # Inspect container
+        inspect_result = client.api.inspect_container(container.id)
+        print(f"Container state: {inspect_result['State']}")
+
+        # Try to execute a command
         try:
             result = container.exec_run("echo 'Container is running'")
             print(f"Exec result: {result.output.decode()}")
         except Exception as e:
             print(f"Exec failed: {str(e)}")
 
-        print("Listing root directory of the container:")
-        exec_result = container.exec_run("ls -la /")
-        print(exec_result.output.decode())
-
-        print("Checking if /tmp exists:")
-        exec_result = container.exec_run("ls -la /tmp")
-        print(exec_result.output.decode())
+        # List processes in the container
+        try:
+            top_result = container.top()
+            print(f"Container processes:\n{top_result}")
+        except Exception as e:
+            print(f"Failed to list processes: {str(e)}")
 
         # Copy model prediction as patch file to container
         patch_file = Path(log_dir / "patch.diff")
