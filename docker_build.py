@@ -555,17 +555,30 @@ def build_and_push(
         return None
 
 
-def push_to_dockerhub(client, full_image_name):
+def image_exists_on_dockerhub(full_image_name):
+    client = docker.from_env()
     try:
-        print(f"Now pushing {full_image_name} to DockerHub...")
-        last_status = None
-        for line in client.images.push(full_image_name, stream=True, decode=True):
-            if "status" in line and line["status"] != last_status:
-                print(f"Push status: {line['status']}")
-                last_status = line["status"]
+        client.images.get_registry_data(full_image_name)
+        return True
+    except docker.errors.NotFound:
+        return False
+    except docker.errors.APIError as e:
+        print(f"Error checking image existence: {e}")
+        return False
+
+def push_to_dockerhub(client, full_image_name):
+    if image_exists_on_dockerhub(full_image_name):
+        print(f"{full_image_name} already exists on DockerHub, skipping push.")
+        return True
+    
+    try:
+        print(f"Pushing {full_image_name} to DockerHub...")
+        client.images.push(full_image_name)
         print(f"Successfully pushed {full_image_name} to DockerHub")
-    except Exception as e:
+        return True
+    except docker.errors.APIError as e:
         print(f"Error pushing {full_image_name} to DockerHub: {e}")
+        return False
 
 
 def build_instance_image(
