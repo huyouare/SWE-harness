@@ -156,15 +156,15 @@ def build_image(
             )
 
             try:
-                stdout, stderr = process.communicate(timeout=1800)  # 30 minutes timeout
+                stdout, stderr = process.communicate(timeout=3600)  # 60 minutes timeout
                 buildlog = stdout + stderr
                 for line in buildlog.splitlines():
                     logger.info(line.strip())
             except subprocess.TimeoutExpired:
                 process.kill()
                 stdout, stderr = process.communicate()
-                print(f"Build process timed out after 30 minutes")
-                logger.error("Build process timed out after 30 minutes")
+                print(f"Build process timed out after 60 minutes")
+                logger.error("Build process timed out after 60 minutes")
                 raise BuildImageError(image_name, "Build timed out", logger)
 
             if process.returncode != 0:
