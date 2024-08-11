@@ -123,7 +123,9 @@ def build_image(
         print(
             f"Building docker image {image_name} in {build_dir} with platform {platform}"
         )
-        print("Start time:", start_time)
+        print(
+            f"Start time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time))}"
+        )
         logger.info(
             f"Building docker image {image_name} in {build_dir} with platform {platform}"
         )
