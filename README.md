@@ -1,5 +1,9 @@
 # SWE-harness
 
+## Docker
+
+Images are hosted here: https://hub.docker.com/repository/docker/huyouare/swebench-lite/general
+
 ## Setup
 
 We are using Python 3.10
@@ -41,6 +45,8 @@ modal deploy main.py && modal run main.py::run_and_save
 ```
 
 ## Build and Push Images
+
+Make sure to run `docker login` first.
 
 ### For EC2 (Ubuntu)
 
