@@ -120,6 +120,10 @@ def build_image(
             f.write(dockerfile)
 
         # Build the image
+        print(
+            f"Building docker image {image_name} in {build_dir} with platform {platform}"
+        )
+        print("Start time:", start_time)
         logger.info(
             f"Building docker image {image_name} in {build_dir} with platform {platform}"
         )
@@ -471,7 +475,6 @@ def build_instance_images(
                     build_and_push,
                     test_spec,
                     client,
-                    None,  # logger is created in build_instance_image, don't make loggers before you need them
                     force_rebuild,
                     dockerhub_prefix,
                     push_to_registry,
@@ -511,7 +514,6 @@ def build_instance_images(
 def build_and_push(
     test_spec: TestSpec,
     client: docker.DockerClient,
-    logger: logging.Logger,
     nocache: bool,
     dockerhub_prefix: str,
     push_to_registry: bool,
@@ -526,32 +528,30 @@ def build_and_push(
         build_instance_image(
             test_spec=test_spec,
             client=client,
-            logger=logger,
             nocache=nocache,
             full_image_name=full_image_name,
         )
 
         if push_to_registry:
-            push_to_dockerhub(client, full_image_name, logger)
+            push_to_dockerhub(client, full_image_name)
             # Delete the local image after successful push
-            remove_image(client, full_image_name, logger)
-            logger.info(f"Removed local image {full_image_name}")
+            remove_image(client, full_image_name, None)
 
         return full_image_name
     except Exception as e:
-        logger.error(f"Error building/pushing image for {test_spec.instance_id}: {e}")
+        print(f"Error building/pushing image for {test_spec.instance_id}: {e}")
         return None
 
 
-def push_to_dockerhub(client, full_image_name, logger):
+def push_to_dockerhub(client, full_image_name):
     try:
-        logger.info(f"Pushing {full_image_name} to DockerHub...")
+        print(f"Pushing {full_image_name} to DockerHub...")
         for line in client.images.push(full_image_name, stream=True, decode=True):
             if "status" in line:
-                logger.info(f"Push status: {line['status']}")
-        logger.info(f"Successfully pushed {full_image_name} to DockerHub")
+                print(f"Push status: {line['status']}")
+        print(f"Successfully pushed {full_image_name} to DockerHub")
     except Exception as e:
-        logger.error(f"Error pushing {full_image_name} to DockerHub: {e}")
+        print(f"Error pushing {full_image_name} to DockerHub: {e}")
 
 
 def build_instance_image(
