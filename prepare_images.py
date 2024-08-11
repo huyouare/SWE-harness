@@ -59,6 +59,7 @@ def main(
     force_rebuild,
     open_file_limit,
     only_x86_64,
+    use_buildx,
     push_to_registry,
     dockerhub_username,
     dockerhub_repo,
@@ -72,7 +73,10 @@ def main(
         force_rebuild (bool): Whether to force rebuild all images.
         open_file_limit (int): Open file limit.
         only_x86_64 (bool): Whether to only build x86_64 images.
+        use_buildx (bool): Whether to use buildx to build multi-architecture images.
         push_to_registry (bool): Whether to push images to DockerHub registry.
+        dockerhub_username (str): DockerHub username.
+        dockerhub_repo (str): DockerHub repository name.
     """
     if only_x86_64:
         # TODO: Do something better here.
@@ -101,8 +105,9 @@ def main(
         dataset=dataset,
         force_rebuild=force_rebuild,
         max_workers=max_workers,
-        dockerhub_prefix=dockerhub_prefix,
+        use_buildx=use_buildx,
         push_to_registry=push_to_registry,
+        dockerhub_prefix=dockerhub_prefix,
     )
     print(f"Successfully built {len(successful)} images")
     print(f"Failed to build {len(failed)} images")
@@ -134,6 +139,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--only_x86_64", type=str2bool, default=True, help="Only build x86_64 images"
+    )
+    parser.add_argument(
+        "--use_buildx",
+        type=str2bool,
+        default=True,
+        help="Use buildx to build multi-architecture images (building x86_64 images from arm64)",
     )
     parser.add_argument(
         "--push_to_registry",

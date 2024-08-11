@@ -5,6 +5,9 @@ import docker
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+import subprocess
+import time
+from datetime import timedelta
 
 from swebench.harness.constants import (
     BASE_IMAGE_BUILD_DIR,
@@ -73,6 +76,7 @@ def build_image(
     client: docker.DockerClient,
     build_dir: Path,
     nocache: bool = False,
+    use_buildx: bool = False,
 ):
     """
     Builds a docker image with the given name, setup scripts, dockerfile, and platform.
@@ -85,7 +89,9 @@ def build_image(
         client (docker.DockerClient): Docker client to use for building the image
         build_dir (Path): Directory for the build context (will also contain logs, scripts, and artifacts)
         nocache (bool): Whether to use the cache when building
+        use_buildx (bool): Whether to use buildx for cross-platform builds
     """
+    start_time = time.time()
     # Create a logger for the build process
     logger = setup_logger(image_name, build_dir / "build_image.log")
     logger.info(
@@ -116,33 +122,79 @@ def build_image(
         logger.info(
             f"Building docker image {image_name} in {build_dir} with platform {platform}"
         )
-        response = client.api.build(
-            path=str(build_dir),
-            tag=image_name,
-            rm=True,
-            forcerm=True,
-            decode=True,
-            platform=platform,
-            nocache=nocache,
-        )
 
-        # Log the build process continuously
-        buildlog = ""
-        for chunk in response:
-            if "stream" in chunk:
-                # Remove ANSI escape sequences from the log
-                chunk_stream = ansi_escape.sub("", chunk["stream"])
-                logger.info(chunk_stream.strip())
-                buildlog += chunk_stream
-            elif "errorDetail" in chunk:
-                # Decode error message, raise BuildError
-                logger.error(
-                    f"Error: {ansi_escape.sub('', chunk['errorDetail']['message'])}"
+        if use_buildx:
+            # Use buildx for cross-platform builds.
+            # `docker build` calls `docker buildx build` under the hood.
+            cmd = [
+                "docker",
+                "build",
+                "--platform",
+                platform,
+                "-t",
+                image_name,
+                "--load",
+                str(build_dir),
+            ]
+            print(f"Using buildx to build image {image_name} on platform {platform}")
+            print(f"Command: `{' '.join(cmd)}`")
+            if nocache:
+                cmd.append("--no-cache")
+
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+            )
+
+            try:
+                stdout, stderr = process.communicate(timeout=900)  # 15 minutes timeout
+                buildlog = stdout + stderr
+                for line in buildlog.splitlines():
+                    logger.info(line.strip())
+            except subprocess.TimeoutExpired:
+                process.kill()
+                stdout, stderr = process.communicate()
+                logger.error("Build process timed out after 15 minutes")
+                raise BuildImageError(image_name, "Build timed out")
+
+            if process.returncode != 0:
+                raise BuildImageError(
+                    image_name,
+                    f"Build failed with exit code {process.returncode}\nError: {stderr}",
                 )
-                raise docker.errors.BuildError(
-                    chunk["errorDetail"]["message"], buildlog
-                )
+
+        else:
+            # Use Docker Python SDK for regular builds
+            response = client.api.build(
+                path=str(build_dir),
+                tag=image_name,
+                rm=True,
+                forcerm=True,
+                decode=True,
+                platform=platform,
+                nocache=nocache,
+            )
+
+            buildlog = ""
+            for chunk in response:
+                if "stream" in chunk:
+                    chunk_stream = ansi_escape.sub("", chunk["stream"])
+                    logger.info(chunk_stream.strip())
+                    buildlog += chunk_stream
+                elif "errorDetail" in chunk:
+                    logger.error(
+                        f"Error: {ansi_escape.sub('', chunk['errorDetail']['message'])}"
+                    )
+                    raise docker.errors.BuildError(
+                        chunk["errorDetail"]["message"], buildlog
+                    )
+
         logger.info("Image built successfully!")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Subprocess error during {image_name} build: {e}")
+        raise BuildImageError(image_name, str(e), logger) from e
     except docker.errors.BuildError as e:
         logger.error(f"docker.errors.BuildError during {image_name}: {e}")
         raise BuildImageError(image_name, str(e), logger) from e
@@ -150,11 +202,17 @@ def build_image(
         logger.error(f"Error building image {image_name}: {e}")
         raise BuildImageError(image_name, str(e), logger) from e
     finally:
-        close_logger(logger)  # functions that create loggers should close them
+        end_time = time.time()
+        build_time = end_time - start_time
+        logger.info(f"Build time for {image_name}: {timedelta(seconds=build_time)}")
+        close_logger(logger)
 
 
 def build_base_images(
-    client: docker.DockerClient, dataset: list, force_rebuild: bool = False
+    client: docker.DockerClient,
+    dataset: list,
+    force_rebuild: bool = False,
+    use_buildx: bool = False,
 ):
     """
     Builds the base images required for the dataset if they do not already exist.
@@ -195,6 +253,7 @@ def build_base_images(
             platform=platform,
             client=client,
             build_dir=BASE_IMAGE_BUILD_DIR / image_name.replace(":", "__"),
+            use_buildx=use_buildx,
         )
     print("Base images built successfully.")
 
@@ -259,6 +318,7 @@ def build_env_images(
     dataset: list,
     force_rebuild: bool = False,
     max_workers: int = 4,
+    use_buildx: bool = False,
 ):
     """
     Builds the environment images required for the dataset if they do not already exist.
@@ -274,7 +334,7 @@ def build_env_images(
         env_image_keys = {x.env_image_key for x in get_test_specs_from_dataset(dataset)}
         for key in env_image_keys:
             remove_image(client, key, "quiet")
-    build_base_images(client, dataset, force_rebuild)
+    build_base_images(client, dataset, force_rebuild, use_buildx)
     configs_to_build = get_env_configs_to_build(client, dataset)
     if len(configs_to_build) == 0:
         print("No environment images need to be built.")
@@ -283,6 +343,9 @@ def build_env_images(
 
     # Build the environment images
     successful, failed = list(), list()
+    build_times = {}
+    total_start_time = time.time()
+
     with tqdm(
         total=len(configs_to_build), smoothing=0, desc="Building environment images"
     ) as pbar:
@@ -297,6 +360,7 @@ def build_env_images(
                     config["platform"],
                     client,
                     ENV_IMAGE_BUILD_DIR / image_name.replace(":", "__"),
+                    use_buildx=use_buildx,
                 ): image_name
                 for image_name, config in configs_to_build.items()
             }
@@ -319,6 +383,23 @@ def build_env_images(
                     failed.append(futures[future])
                     continue
 
+    total_end_time = time.time()
+    total_build_time = total_end_time - total_start_time
+    print(f"Total build time for all images: {timedelta(seconds=total_build_time)}")
+    print(
+        f"Average build time per image: {timedelta(seconds=total_build_time / len(configs_to_build))}"
+    )
+
+    if build_times:
+        longest_build = max(build_times, key=build_times.get)
+        shortest_build = min(build_times, key=build_times.get)
+        print(
+            f"Longest build: {longest_build} ({timedelta(seconds=build_times[longest_build])})"
+        )
+        print(
+            f"Shortest build: {shortest_build} ({timedelta(seconds=build_times[shortest_build])})"
+        )
+
     # Show how many images failed to build
     if len(failed) == 0:
         print("All environment images built successfully.")
@@ -334,6 +415,7 @@ def build_instance_images(
     dataset: list,
     force_rebuild: bool = False,
     max_workers: int = 4,
+    use_buildx: bool = False,
     dockerhub_prefix: str = "",
     push_to_registry: bool = False,
 ):
@@ -345,6 +427,7 @@ def build_instance_images(
         client (docker.DockerClient): Docker client to use for building the images
         force_rebuild (bool): Whether to force rebuild the images even if they already exist
         max_workers (int): Maximum number of workers to use for building images
+        use_buildx (bool): Whether to use buildx for cross-platform builds
         dockerhub_prefix (str): Prefix for DockerHub image names
         push_to_registry (bool): Whether to push images to DockerHub registry
     """
@@ -353,7 +436,10 @@ def build_instance_images(
     if force_rebuild:
         for spec in test_specs:
             remove_image(client, spec.instance_image_key, "quiet")
-    _, env_failed = build_env_images(client, test_specs, force_rebuild, max_workers)
+    _, env_failed = build_env_images(
+        client, test_specs, force_rebuild, max_workers, use_buildx
+    )
+    return
 
     if len(env_failed) > 0:
         # Don't build images for instances that depend on failed-to-build env images
