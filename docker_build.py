@@ -317,7 +317,13 @@ def get_env_configs_to_build(
         except docker.errors.ImageNotFound:
             pass
         if not image_exists:
-            # Add the environment image to the list of images to build
+            # Pretty print the test spec
+            print(f"Building environment image for {test_spec.env_image_key}")
+            print(f"Base image: {test_spec.base_image_key}")
+            print(f"instance_id: {test_spec.instance_id}")
+            print(f"repo: {test_spec.repo}")
+            print(f"version: {test_spec.version}")
+            print(f"env_script_list: {test_spec.env_script_list}")
             image_scripts[test_spec.env_image_key] = {
                 "setup_script": test_spec.setup_env_script,
                 "dockerfile": test_spec.env_dockerfile,
@@ -342,6 +348,7 @@ def build_env_images(
         force_rebuild (bool): Whether to force rebuild the images even if they already exist
         max_workers (int): Maximum number of workers to use for building images
     """
+    print(f"Building environment images for {len(dataset)} environments")
     # Get the environment images to build from the dataset
     if force_rebuild:
         env_image_keys = {x.env_image_key for x in get_test_specs_from_dataset(dataset)}
@@ -365,16 +372,17 @@ def build_env_images(
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             # Create a future for each image to build
             futures = {
-                executor.submit(
-                    build_image,
-                    image_name,
-                    {"setup_env.sh": config["setup_script"]},
-                    config["dockerfile"],
-                    config["platform"],
-                    ENV_IMAGE_BUILD_DIR / image_name.replace(":", "__"),
-                    use_buildx=use_buildx,
-                ): image_name
-                for image_name, config in configs_to_build.items()
+                # HACK: skip for now
+                # executor.submit(
+                #     build_image,
+                #     image_name,
+                #     {"setup_env.sh": config["setup_script"]},
+                #     config["dockerfile"],
+                #     config["platform"],
+                #     ENV_IMAGE_BUILD_DIR / image_name.replace(":", "__"),
+                #     use_buildx=use_buildx,
+                # ): image_name
+                # for image_name, config in configs_to_build.items()
             }
 
             # Wait for each future to complete
@@ -476,7 +484,6 @@ def build_instance_images(
                 executor.submit(
                     build_and_push,
                     test_spec,
-                    client,
                     force_rebuild,
                     dockerhub_prefix,
                     push_to_registry,
@@ -515,21 +522,23 @@ def build_instance_images(
 
 def build_and_push(
     test_spec: TestSpec,
-    client: docker.DockerClient,
     nocache: bool,
     dockerhub_prefix: str,
     push_to_registry: bool,
 ):
     try:
         full_image_name = (
-            f"{dockerhub_prefix}/{test_spec.instance_image_key}"
+            f"{dockerhub_prefix}:{test_spec.instance_image_key}"
             if dockerhub_prefix
             else test_spec.instance_image_key
         )
 
+        client = docker.from_env()
+
         build_instance_image(
             test_spec=test_spec,
             client=client,
+            logger=None,
             nocache=nocache,
             full_image_name=full_image_name,
         )
