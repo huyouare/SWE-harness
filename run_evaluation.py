@@ -4,6 +4,7 @@ import docker
 import json
 import resource
 import traceback
+import time
 
 from argparse import ArgumentParser
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -72,7 +73,7 @@ def run_instance(
         run_id (str): Run ID
         timeout (int): Timeout for running tests
     """
-    # print(f"Running instance {test_spec.instance_id}...")
+    start_time = time.time()
     # Set up logging directory
     instance_id = test_spec.instance_id
     model_name_or_path = pred.get("model_name_or_path", "None").replace("/", "__")
@@ -112,8 +113,6 @@ def run_instance(
         print(f"Immediate container status: {container.status}")
 
         # Wait and check status
-        import time
-
         time.sleep(2)
         container.reload()
         print(f"Container status after 2 seconds: {container.status}")
@@ -261,6 +260,7 @@ def run_instance(
         # Remove instance container + image, close logger
         cleanup_container(client, container, logger)
         close_logger(logger)
+        print(f"Instance {instance_id} ran in {time.time() - start_time:.2f} seconds")
     return
 
 
