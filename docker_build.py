@@ -528,7 +528,7 @@ def build_and_push(
 ):
     try:
         full_image_name = (
-            f"{dockerhub_prefix}:{test_spec.instance_image_key}"
+            f"{dockerhub_prefix}:sweb.eval.{test_spec.arch}.{test_spec.instance_id}"
             if dockerhub_prefix
             else test_spec.instance_image_key
         )
@@ -544,6 +544,7 @@ def build_and_push(
         )
 
         if push_to_registry:
+            print(f"Pushing {full_image_name} to DockerHub...")
             push_to_dockerhub(client, full_image_name)
             # Delete the local image after successful push
             remove_image(client, full_image_name, None)
@@ -556,7 +557,7 @@ def build_and_push(
 
 def push_to_dockerhub(client, full_image_name):
     try:
-        print(f"Pushing {full_image_name} to DockerHub...")
+        print(f"Now pushing {full_image_name} to DockerHub...")
         for line in client.images.push(full_image_name, stream=True, decode=True):
             if "status" in line:
                 print(f"Push status: {line['status']}")
@@ -609,6 +610,7 @@ def build_instance_image(
         f"Building instance image {full_image_name} for {test_spec.instance_id}"
     )
 
+    print(f"Checking if image {full_image_name} already exists...")
     # Check if the instance image already exists
     image_exists = False
     try:
@@ -622,6 +624,7 @@ def build_instance_image(
     except docker.errors.ImageNotFound:
         pass
 
+    print(f"Image {full_image_name} already exists: {image_exists}")
     # Build the instance image
     if not image_exists:
         build_image(
