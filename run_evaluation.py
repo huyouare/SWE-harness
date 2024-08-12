@@ -98,11 +98,23 @@ def run_instance(
         client.images.pull(image_name)
         logger.info(f"Image {image_name} pulled successfully")
         print(f"Image {image_name} pulled successfully")
+
+        container_name = f"sweb.eval.x86_64.{instance_id}"
+        
+        # Check if a container with this name already exists
+        try:
+            existing_container = client.containers.get(container_name)
+            logger.info(f"Container {container_name} already exists. Removing it.")
+            existing_container.remove(force=True)
+            logger.info(f"Container {container_name} removed successfully.")
+        except docker.errors.NotFound:
+            pass  # Container doesn't exist, which is fine
+
         # Create and start the container
         container = client.containers.run(
             image_name,
             detach=True,
-            name=f"sweb.eval.x86_64.{instance_id}",
+            name=container_name,
             remove=rm_container,
             command="tail -f /dev/null",  # Keep the container running
         )
