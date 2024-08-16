@@ -11,6 +11,7 @@ swebench = {git = "https://github.com/princeton-nlp/SWE-bench.git"}
 modal = "^0.64.4"
 jsonlines = "^4.0.0"
 docker = "^7.1.0"
+tqdm = "^4.66.5"
 
 
 [tool.poetry.group.dev.dependencies]
