@@ -1,17 +1,26 @@
 import json
+import requests
 
 
-def _extract_instance_ids(jsonl_file):
+def _extract_instance_ids_from_dockerhub():
+    repository = "huyouare/swebench-lite"
+    url = f"https://hub.docker.com/v2/repositories/{repository}/tags"
     instance_ids = []
-    with open(jsonl_file, "r") as file:
-        for line in file:
-            try:
-                data = json.loads(line)
-                instance_id = data.get("instance_id")
-                if instance_id:
-                    instance_ids.append(instance_id)
-            except json.JSONDecodeError:
-                print(f"Warning: Could not parse line: {line}")
+
+    while url:
+        response = requests.get(url)
+        if response.status_code != 200:
+            print(f"Error fetching tags: {response.status_code}")
+            break
+
+        data = response.json()
+        for tag in data["results"]:
+            if tag["name"].startswith("sweb.eval.x86_64."):
+                instance_id = tag["name"].split("sweb.eval.x86_64.")[1]
+                instance_ids.append(instance_id)
+
+        url = data.get("next")
+
     return sorted(instance_ids)
 
 
@@ -24,13 +33,13 @@ def _generate_functions(instance_ids, output_file_path):
             )
 
             output_file.write(
-                f'@app.function(image=create_modal_image("{instance_id}"), cpu=1, memory=2048, timeout=60 * 10, serialized=True)\n'
+                f'@app.function(image=create_modal_image("{instance_id}"), cpu=1, memory=2048, timeout=60 * 10)\n'
             )
             output_file.write(
-                f"def {function_name}(patch_content: str, eval_script: str, timeout: int):\n"
+                f"def {function_name}(patch_content: str, eval_script: str):\n"
             )
             output_file.write(
-                "    return run_instance_modal_inner(patch_content, eval_script, timeout)\n"
+                "    return run_instance_modal_inner(patch_content, eval_script)\n"
             )
             output_file.write("\n")
 
@@ -52,11 +61,10 @@ def _generate_functions(instance_ids, output_file_path):
 
 # Main execution
 if __name__ == "__main__":
-    jsonl_file_path = "20240623_moatless_claude-3.5-sonnet_all_preds.jsonl"
     output_file_path = "generated_functions.py"
 
-    # Extract instance_ids
-    instance_ids = _extract_instance_ids(jsonl_file_path)
+    # Extract instance_ids from Docker Hub
+    instance_ids = _extract_instance_ids_from_dockerhub()
 
     # Print the extracted instance_ids
     print("Extracted instance_ids:")
