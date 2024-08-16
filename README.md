@@ -2,7 +2,13 @@
 
 ## Docker
 
-Images are hosted here: https://hub.docker.com/repository/docker/huyouare/swebench-lite/general
+Images are hosted here:
+
+### SWE-Bench Verified
+https://hub.docker.com/r/huyouare/swebench-verified
+
+### SWE-Bench Lite
+https://hub.docker.com/repository/docker/huyouare/swebench-lite/general
 
 ## Setup
 
@@ -35,6 +41,16 @@ Install poetry and then run:
 ```bash
 poetry install --no-root
 poetry shell
+```
+
+## Running evaluation on Modal
+
+```bash
+poetry run modal run run_evaluation_modal.py \
+    --dataset-name "princeton-nlp/SWE-bench_Lite" \
+    --split test \
+    --predictions-path your_preds.jsonl
+    --run-id your_run_name
 ```
 
 ## Running (outdated)
