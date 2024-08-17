@@ -12,3 +12,7 @@ dist/
 
 # SWEBench
 logs/
+
+# This repo
+error
+error.log

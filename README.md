@@ -1,13 +1,40 @@
 # SWE-harness
 
-## Docker
+## Overview
+
+Here's what the overview of how SWE-Bench works when run out of the box:
+
+![SWE-harness Architecture Diagram](screenshots/diagram-1.png)
+
+- There are three levels of containers being built:
+  - Base images
+  - Environment images
+  - Instance images
+
+![SWE-harness Architecture Diagram](screenshots/diagram-2.png)
+
+- In total this process takes quite a bit of time and disk cost, especially if running locally on your local machine.
+
+To improve on this, we propose the following changes:
+
+- First, pre-build all of the Docker images in batch and save them to DockerHub.
+- Then, at evaluation time, we load these images instead of re-building them.
+- Finally, we can distribute the patch and evaluation scripts on a machine per container, meaning that we can run the entire dataset in parallel.
+- This brings the final time from 2+ hours to 5 minutes, and the disk requirement from 100GB+ to minimal.
+- The final cost on a provider like Modal is about 50 cents per run.
+
+![SWE-harness Architecture Diagram](screenshots/diagram-3.png)
+
+## Pre-built Docker images
 
 Images are hosted here:
 
 ### SWE-Bench Verified
+
 https://hub.docker.com/r/huyouare/swebench-verified
 
 ### SWE-Bench Lite
+
 https://hub.docker.com/repository/docker/huyouare/swebench-lite/general
 
 ## Setup
