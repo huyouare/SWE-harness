@@ -1,10 +1,12 @@
 import json
 import requests
 
+REPOSITORY_USER = "huyouare"
+REPOSITORY_NAME = "swebench-verified"
+
 
 def _extract_instance_ids_from_dockerhub():
-    repository = "huyouare/swebench-lite"
-    url = f"https://hub.docker.com/v2/repositories/{repository}/tags"
+    url = f"https://hub.docker.com/v2/repositories/{REPOSITORY_USER}/{REPOSITORY_NAME}/tags"
     instance_ids = []
 
     while url:
@@ -61,7 +63,7 @@ def _generate_functions(instance_ids, output_file_path):
 
 # Main execution
 if __name__ == "__main__":
-    output_file_path = "generated_functions.py"
+    output_file_path = f"generated_functions_{REPOSITORY_NAME}.py"
 
     # Extract instance_ids from Docker Hub
     instance_ids = _extract_instance_ids_from_dockerhub()
