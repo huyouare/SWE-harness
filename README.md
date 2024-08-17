@@ -43,9 +43,9 @@ We are using Python 3.10
 
 ### Installation on EC2 (Ubuntu)
 
-Use instance `t3a.2xlarge`. Make sure it's x86 and not arm/amd.
+Use instance `t3a.2xlarge`. Make sure it's x86 or amd64 and not arm64 (most new instances are now ARM-based).
 
-Install Docker:
+Install Docker:f
 
 ```bash
 sudo apt install docker.io
