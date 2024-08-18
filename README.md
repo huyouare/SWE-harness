@@ -45,13 +45,18 @@ We are using Python 3.10
 
 Use instance `t3a.2xlarge`. Make sure it's x86 or amd64 and not arm64 (most new instances are now ARM-based).
 
-Install Docker:f
+Install Docker:
 
 ```bash
 sudo apt install docker.io
 ```
 
 Install pyenv and Python 3.10: https://ericsysmin.com/2024/01/11/how-to-install-pyenv-on-ubuntu-22-04/
+```bash
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt update
+sudo apt install python3.10
+```
 
 Then install and run Poetry:
 
