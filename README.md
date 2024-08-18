@@ -64,6 +64,12 @@ Restart or manually start the Docker daemon:
 sudo systemctl start docker
 ```
 
+Then git clone:
+```bash
+git clone https://github.com/huyouare/SWE-harness
+cd SWE-harness
+```
+
 Then install and run Poetry:
 ```bash
 sudo apt install python3-poetry
