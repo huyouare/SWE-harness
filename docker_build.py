@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import time
 from datetime import timedelta
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 
 from swebench.harness.constants import (
     BASE_IMAGE_BUILD_DIR,
@@ -368,7 +368,7 @@ def build_env_images(
     with tqdm(
         total=len(configs_to_build), smoothing=0, desc="Building environment images"
     ) as pbar:
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Create a future for each image to build
             futures = {
                 executor.submit(
@@ -476,7 +476,7 @@ def build_instance_images(
     with tqdm(
         total=len(test_specs), smoothing=0, desc="Building instance images"
     ) as pbar:
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Create a future for each image to build
             futures = {
                 executor.submit(
