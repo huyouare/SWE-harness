@@ -1,4 +1,4 @@
-# SWE-harness
+# SWE-harness (sweharness)
 
 ## Overview
 
