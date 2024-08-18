@@ -318,12 +318,11 @@ def get_env_configs_to_build(
             pass
         if not image_exists:
             # Pretty print the test spec
-            print(f"Building environment image for {test_spec.env_image_key}")
-            print(f"Base image: {test_spec.base_image_key}")
-            print(f"instance_id: {test_spec.instance_id}")
-            print(f"repo: {test_spec.repo}")
-            print(f"version: {test_spec.version}")
-            print(f"env_script_list: {test_spec.env_script_list}")
+            # print(f"Building environment image for {test_spec.env_image_key}")
+            # print(f"Base image: {test_spec.base_image_key}")
+            # print(f"instance_id: {test_spec.instance_id}")
+            # print(f"repo: {test_spec.repo}")
+            # print(f"version: {test_spec.version}")
             image_scripts[test_spec.env_image_key] = {
                 "setup_script": test_spec.setup_env_script,
                 "dockerfile": test_spec.env_dockerfile,
