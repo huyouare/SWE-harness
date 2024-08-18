@@ -43,7 +43,16 @@ We are using Python 3.10
 
 ### Installation on EC2 (Ubuntu)
 
-Use instance `t3a.2xlarge`. Make sure it's x86 or amd64 and not arm64 (most new instances are now ARM-based).
+Use instance `t3a.2xlarge` for x86. Make sure it's x86 or amd64 and not arm64 (most new instances are now ARM-based).
+
+If you're building for arm64, use instance `t4g.2xlarge`.
+
+Install pyenv and Python 3.10: https://ericsysmin.com/2024/01/11/how-to-install-pyenv-on-ubuntu-22-04/
+```bash
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt update
+sudo apt install python3.10
+```
 
 Install Docker:
 ```bash
@@ -55,15 +64,7 @@ Restart or manually start the Docker daemon:
 sudo systemctl start docker
 ```
 
-Install pyenv and Python 3.10: https://ericsysmin.com/2024/01/11/how-to-install-pyenv-on-ubuntu-22-04/
-```bash
-sudo add-apt-repository ppa:deadsnakes/ppa
-sudo apt update
-sudo apt install python3.10
-```
-
 Then install and run Poetry:
-
 ```bash
 sudo apt install python3-poetry
 poetry install --no-root
