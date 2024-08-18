@@ -48,6 +48,7 @@ Use instance `t3a.2xlarge` for x86. Make sure it's x86 or amd64 and not arm64 (m
 If you're building for arm64, use instance `t4g.2xlarge`.
 
 Install pyenv and Python 3.10: https://ericsysmin.com/2024/01/11/how-to-install-pyenv-on-ubuntu-22-04/
+
 ```bash
 sudo add-apt-repository ppa:deadsnakes/ppa
 sudo apt update
@@ -55,22 +56,26 @@ sudo apt install python3.10
 ```
 
 Install Docker:
+
 ```bash
 sudo apt install docker.io
 ```
 
 Restart or manually start the Docker daemon:
+
 ```bash
 sudo systemctl start docker
 ```
 
 Then git clone:
+
 ```bash
 git clone https://github.com/huyouare/SWE-harness
 cd SWE-harness
 ```
 
 Then install and run Poetry:
+
 ```bash
 sudo apt install python3-poetry
 poetry install --no-root
@@ -96,13 +101,6 @@ poetry run modal run run_evaluation_modal.py \
     --run-id your_run_name
 ```
 
-## Running (outdated)
-
-```bash
-# Deploy the script to Modal and run the remote job
-modal deploy main.py && modal run main.py::run_and_save
-```
-
 ## Build and Push Images
 
 Make sure to run `docker login` first.
@@ -122,6 +120,7 @@ python prepare_images.py \
 ### For Mac or arm64
 
 First install buildx:
+
 ```
 sudo apt install docker-buildx
 ```
