@@ -46,9 +46,13 @@ We are using Python 3.10
 Use instance `t3a.2xlarge`. Make sure it's x86 or amd64 and not arm64 (most new instances are now ARM-based).
 
 Install Docker:
-
 ```bash
 sudo apt install docker.io
+```
+
+Restart or manually start the Docker daemon:
+```bash
+sudo systemctl start docker
 ```
 
 Install pyenv and Python 3.10: https://ericsysmin.com/2024/01/11/how-to-install-pyenv-on-ubuntu-22-04/
