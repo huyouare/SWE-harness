@@ -119,7 +119,12 @@ python prepare_images.py \
     --max_workers 8
 ```
 
-### For Mac
+### For Mac or arm64
+
+First install buildx:
+```
+sudo apt install docker-buildx
+```
 
 ```bash
 docker buildx create --name mybuilder --use
@@ -142,6 +147,10 @@ python prepare_images.py \
 - This requires docker buildx, which is not set up by default.
 
 If running on arm:
+
+```bash
+sudo apt install docker-buildx
+```
 
 ```bash
 docker buildx create --name mybuilder --use
