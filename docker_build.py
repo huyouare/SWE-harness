@@ -372,17 +372,16 @@ def build_env_images(
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             # Create a future for each image to build
             futures = {
-                # HACK: skip for now
-                # executor.submit(
-                #     build_image,
-                #     image_name,
-                #     {"setup_env.sh": config["setup_script"]},
-                #     config["dockerfile"],
-                #     config["platform"],
-                #     ENV_IMAGE_BUILD_DIR / image_name.replace(":", "__"),
-                #     use_buildx=use_buildx,
-                # ): image_name
-                # for image_name, config in configs_to_build.items()
+                executor.submit(
+                    build_image,
+                    image_name,
+                    {"setup_env.sh": config["setup_script"]},
+                    config["dockerfile"],
+                    config["platform"],
+                    ENV_IMAGE_BUILD_DIR / image_name.replace(":", "__"),
+                    use_buildx=use_buildx,
+                ): image_name
+                for image_name, config in configs_to_build.items()
             }
 
             # Wait for each future to complete
@@ -571,11 +570,12 @@ def image_exists_on_dockerhub(full_image_name):
         print(f"Error checking image existence: {e}")
         return False
 
+
 def push_to_dockerhub(client, full_image_name):
     if image_exists_on_dockerhub(full_image_name):
         print(f"{full_image_name} already exists on DockerHub, skipping push.")
         return True
-    
+
     try:
         print(f"Pushing {full_image_name} to DockerHub...")
         client.images.push(full_image_name)
