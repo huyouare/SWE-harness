@@ -94,9 +94,13 @@ poetry shell
 ## Running evaluation on Modal
 
 ```bash
-poetry run modal run run_evaluation_modal.py \
-    --dataset-name "princeton-nlp/SWE-bench_Lite" \
-    --split test \
+poetry run modal run run_evaluation_modal_lite.py \
+    --predictions-path your_preds.jsonl
+    --run-id your_run_name
+```
+
+```bash
+poetry run modal run run_evaluation_modal_verified.py \
     --predictions-path your_preds.jsonl
     --run-id your_run_name
 ```

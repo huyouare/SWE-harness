@@ -7,7 +7,7 @@ from argparse import ArgumentParser
 from typing import Optional
 from tqdm import tqdm
 
-from modal_functions.swebench_verified import app as helper_app, dispatcher
+from modal_functions.swebench_lite import app as helper_app, dispatcher
 
 app = modal.App("swebench-evaluation")
 app.include(helper_app)
@@ -275,7 +275,7 @@ def make_run_report(
 
 @app.local_entrypoint()
 def main(
-    dataset_name: str = "princeton-nlp/SWE-bench_Verified",
+    dataset_name: str = "princeton-nlp/SWE-bench_Lite",
     split: str = "test",
     instance_ids: Optional[str] = None,
     predictions_path: str = None,
