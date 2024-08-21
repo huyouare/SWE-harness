@@ -123,6 +123,7 @@ async def run_instances(predictions, instances, run_id, job_id):
     tasks = [process_instance(instance, predictions, run_id) for instance in instances]
     results = []
     instance_records = []
+    redis = create_redis_client()
     for task in tqdm(asyncio.as_completed(tasks), total=len(tasks)):
         try:
             result = await task
@@ -130,20 +131,20 @@ async def run_instances(predictions, instances, run_id, job_id):
             if result:
                 instance_id, report = result
                 results.append(result)
-                instance_records.append(
-                    {
-                        "instance_id": instance_id,
-                        "test_input_instance": next(
-                            i for i in instances if i["instance_id"] == instance_id
-                        ),
-                        "model_prediction": predictions[instance_id],
-                        "report": report,
-                    }
-                )
-                # Create report
-                report = make_run_report(predictions, instances, results, run_id)
-                # Write report to Redis
-                redis = create_redis_client()
+                instance_record = {
+                    "instance_id": instance_id,
+                    "test_input_instance": next(
+                        i for i in instances if i["instance_id"] == instance_id
+                    ),
+                    "model_prediction": predictions[instance_id],
+                    "report": report,
+                }
+                instance_records.append(instance_record)
+
+                # Store individual instance record in Redis
+                redis.set(f"job:{job_id}:instance:{instance_id}", instance_record)
+
+                # Update job progress
                 progress = len(results) / len(tasks) * 100
                 elapsed_time = time.time() - start_time
                 redis.set(
@@ -152,10 +153,9 @@ async def run_instances(predictions, instances, run_id, job_id):
                         {
                             "status": "in_progress",
                             "progress": progress,
-                            "report": report,
                             "start_time": start_time,
                             "elapsed_time": elapsed_time,
-                            "instance_records": instance_records,
+                            "report": report,
                         }
                     ),
                 )
@@ -164,11 +164,17 @@ async def run_instances(predictions, instances, run_id, job_id):
             print("Task was cancelled")
         except Exception as e:
             print(f"An error occurred during task execution: {str(e)}")
-            # Optionally, you can log the full traceback
             import traceback
 
             print(traceback.format_exc())
-    return results, instance_records
+
+    # Store the list of instance IDs
+    redis.set(
+        f"job:{job_id}:instance_ids",
+        json.dumps([r["instance_id"] for r in instance_records]),
+    )
+
+    return results
 
 
 def get_dataset_from_preds(
@@ -427,9 +433,7 @@ def main(
     if not dataset:
         print("No instances to run.")
     else:
-        results, instance_records = asyncio.run(
-            run_instances(predictions, dataset, run_id, job_id)
-        )
+        results = asyncio.run(run_instances(predictions, dataset, run_id, job_id))
 
     print("Running final report...")
 
@@ -446,7 +450,6 @@ def main(
                 "progress": 100,
                 "start_time": start_time,
                 "elapsed_time": elapsed_time,
-                "instance_records": instance_records,
             }
         ),
     )
@@ -493,7 +496,18 @@ def start_evaluation(request: EvaluationRequest):
 
     redis = create_redis_client()
     # Store initial job status
-    redis.set(f"job:{job_id}", json.dumps({"status": "queued", "progress": 0}))
+    redis.set(
+        f"job:{job_id}",
+        json.dumps(
+            {
+                "status": "queued",
+                "progress": 0,
+                "start_time": time.time(),
+                "elapsed_time": 0,
+                "report": {},
+            }
+        ),
+    )
 
     # Start the evaluation process asynchronously
     run_evaluation.spawn(job_id, request)
@@ -503,12 +517,40 @@ def start_evaluation(request: EvaluationRequest):
 
 @app.function(secrets=[modal.Secret.from_name("upstash")])
 @modal.web_endpoint(method="GET", docs=True)
-def get_job_status(job_id: str):
+def get_job_status(job_id: str, page: int = 1, page_size: int = 10):
     redis = create_redis_client()
-    status = redis.get(f"job:{job_id}")
-    if status is None:
+    job_json = redis.get(f"job:{job_id}")
+    if job_json is None:
         return {"error": "Job not found"}
-    return json.loads(status)
+
+    job_data = json.loads(job_json)
+
+    # Get the list of instance IDs
+    instance_ids = json.loads(redis.get(f"job:{job_id}:instance_ids") or "[]")
+
+    # Paginate instance IDs
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated_ids = instance_ids[start:end]
+
+    # Fetch paginated instance records
+    instance_records = []
+    for instance_id in paginated_ids:
+        record = redis.get(f"job:{job_id}:instance:{instance_id}")
+        if record:
+            instance_records.append(json.loads(record))
+
+    return {
+        "status": job_data["status"],
+        "progress": job_data["progress"],
+        "start_time": job_data["start_time"],
+        "elapsed_time": job_data["elapsed_time"],
+        "report": job_data["report"],
+        "instance_records": instance_records,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (len(instance_ids) + page_size - 1) // page_size,
+    }
 
 
 if __name__ == "__main__":
