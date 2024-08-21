@@ -1,24 +1,57 @@
 from __future__ import annotations
 
-import modal
 import json
-from pathlib import Path
 from argparse import ArgumentParser
+from pathlib import Path
 from typing import Optional
+
+import modal
+from pydantic import BaseModel
 from tqdm import tqdm
 
-from modal_functions.swebench_lite import app as helper_app, dispatcher
+from modal_functions.swebench_lite import app as helper_app
+from modal_functions.swebench_lite import dispatcher
 
 app = modal.App("swebench-evaluation")
 app.include(helper_app)
 
 
+endpoint_image = (
+    modal.Image.debian_slim(python_version="3.10")
+    .apt_install("git")
+    .pip_install("tqdm")
+    .pip_install("modal")
+    .pip_install("jsonlines")
+    .run_commands("pip install git+https://github.com/princeton-nlp/SWE-bench.git")
+)
+
+
+class Prediction(BaseModel):
+    model_name_or_path: str
+    instance_id: str
+    model_patch: str
+
+
+class ProcessInstanceRequest(BaseModel):
+    prediction: Prediction
+    run_id: str
+
+
+@app.function(image=endpoint_image)
+@modal.web_endpoint(method="POST")
+async def process_instance_endpoint(request: ProcessInstanceRequest):
+    """
+    Endpoint to process an instance.
+    """
+    return await process_instance(
+        request.prediction.instance_id, request.prediction, request.run_id
+    )
+
+
 async def process_instance(instance, predictions, run_id):
+    from swebench.harness.constants import RUN_EVALUATION_LOG_DIR
     from swebench.harness.grading import get_eval_report
     from swebench.harness.test_spec import make_test_spec
-    from swebench.harness.constants import (
-        RUN_EVALUATION_LOG_DIR,
-    )
 
     test_spec = make_test_spec(instance)
     instance_id = test_spec.instance_id
@@ -94,10 +127,7 @@ def get_dataset_from_preds(
     If instance_ids is provided, only return instances with those IDs.
     If exclude_completed is True, only return instances that have not been run yet.
     """
-    from swebench.harness.constants import (
-        KEY_INSTANCE_ID,
-        RUN_EVALUATION_LOG_DIR,
-    )
+    from swebench.harness.constants import KEY_INSTANCE_ID, RUN_EVALUATION_LOG_DIR
     from swebench.harness.utils import load_swebench_dataset
 
     # load dataset
@@ -189,10 +219,7 @@ def make_run_report(
     Returns:
         Path to report file
     """
-    from swebench.harness.constants import (
-        KEY_INSTANCE_ID,
-        RUN_EVALUATION_LOG_DIR,
-    )
+    from swebench.harness.constants import KEY_INSTANCE_ID, RUN_EVALUATION_LOG_DIR
 
     # instantiate sets to store IDs of different outcomes
     completed_ids = set()
@@ -286,9 +313,8 @@ def main(
     Run evaluation harness for the given dataset and predictions.
     """
     import asyncio
-    from swebench.harness.constants import (
-        KEY_INSTANCE_ID,
-    )
+
+    from swebench.harness.constants import KEY_INSTANCE_ID
     from swebench.harness.utils import load_swebench_dataset
 
     print(f"Running SWEBench on dataset {dataset_name} with split {split}")
