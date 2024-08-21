@@ -22,18 +22,41 @@ endpoint_image = (
     .pip_install("tqdm")
     .pip_install("modal")
     .pip_install("jsonlines")
+    .pip_install("pydantic")
     .run_commands("pip install git+https://github.com/princeton-nlp/SWE-bench.git")
 )
 
 
-class Prediction(BaseModel):
+def pydantic_to_dict(model):
+    result = {}
+    for field in model.__fields__:
+        value = getattr(model, field)
+        if isinstance(value, BaseModel):
+            result[field] = pydantic_to_dict(value)
+        elif isinstance(value, list):
+            result[field] = [
+                pydantic_to_dict(item) if isinstance(item, BaseModel) else item
+                for item in value
+            ]
+        elif isinstance(value, dict):
+            result[field] = {
+                k: pydantic_to_dict(v) if isinstance(v, BaseModel) else v
+                for k, v in value.items()
+            }
+        else:
+            result[field] = value
+    return result
+
+
+class MejiPrediction(BaseModel):
     model_name_or_path: str
     instance_id: str
     model_patch: str
 
 
 class ProcessInstanceRequest(BaseModel):
-    prediction: Prediction
+    instance_id: str
+    prediction: MejiPrediction
     run_id: str
 
 
@@ -43,9 +66,16 @@ async def process_instance_endpoint(request: ProcessInstanceRequest):
     """
     Endpoint to process an instance.
     """
-    return await process_instance(
-        request.prediction.instance_id, request.prediction, request.run_id
-    )
+    prediction = {request.prediction.instance_id: pydantic_to_dict(request.prediction)}
+    instance = get_dataset_from_preds(
+        "princeton-nlp/SWE-bench_Lite",
+        "test",
+        [request.prediction.instance_id],
+        prediction,
+        request.run_id,
+        exclude_completed=False,
+    )[0]
+    return await process_instance(instance, prediction, request.run_id)
 
 
 async def process_instance(instance, predictions, run_id):
@@ -55,6 +85,7 @@ async def process_instance(instance, predictions, run_id):
 
     test_spec = make_test_spec(instance)
     instance_id = test_spec.instance_id
+    print(predictions)
     pred = predictions[instance_id]
 
     instance_function = dispatcher(instance_id)
