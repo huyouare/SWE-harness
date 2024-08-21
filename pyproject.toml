@@ -12,6 +12,8 @@ modal = "^0.64.4"
 jsonlines = "^4.0.0"
 docker = "^7.1.0"
 tqdm = "^4.66.5"
+python-ulid = {extras = ["pydantic"], version = "^2.7.0"}
+redis = "^5.0.8"
 
 
 [tool.poetry.group.dev.dependencies]

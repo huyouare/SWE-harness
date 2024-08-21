@@ -8,6 +8,7 @@ from argparse import ArgumentParser
 from typing import Optional
 from tqdm import tqdm
 from pydantic import BaseModel
+import os
 
 from modal_functions.swebench_verified import app as helper_app, dispatcher
 
@@ -17,6 +18,8 @@ image = (
     .pip_install("tqdm")
     .pip_install("modal")
     .pip_install("jsonlines")
+    .pip_install("redis")
+    .pip_install("python-ulid")
     .run_commands("pip install git+https://github.com/princeton-nlp/SWE-bench.git")
 )
 
@@ -70,9 +73,21 @@ async def process_instance(instance, predictions, run_id):
         return None
 
 
-async def run_instances(predictions, instances, run_id):
+def create_redis_client():
+    from redis import Redis
+
+    return Redis(
+        host=os.environ["REDIS_HOST"],
+        port=os.environ["REDIS_PORT"],
+        password=os.environ["REDIS_PASSWORD"],
+        ssl=True,
+    )
+
+
+async def run_instances(predictions, instances, run_id, job_id):
     import asyncio
 
+    start_time = time.time()
     tasks = [process_instance(instance, predictions, run_id) for instance in instances]
     results = []
     for task in tqdm(asyncio.as_completed(tasks), total=len(tasks)):
@@ -81,6 +96,25 @@ async def run_instances(predictions, instances, run_id):
             print(f"Result: {result}")
             if result:
                 results.append(result)
+                # Create report
+                report = make_run_report(predictions, instances, results, run_id)
+                # Write report to Redis
+                redis = create_redis_client()
+                progress = len(results) / len(tasks) * 100
+                elapsed_time = time.time() - start_time
+                redis.set(
+                    f"job:{job_id}",
+                    json.dumps(
+                        {
+                            "status": "in_progress",
+                            "progress": progress,
+                            "report": report,
+                            "start_time": start_time,
+                            "elapsed_time": elapsed_time,
+                        }
+                    ),
+                )
+
         except asyncio.CancelledError:
             print("Task was cancelled")
         except Exception as e:
@@ -291,7 +325,7 @@ def main(
     instance_ids: Optional[str] = None,
     predictions_path: str = None,
     run_id: str = None,
-    timeout: int = 1800,
+    job_id: str = None,
 ):
     """
     Run evaluation harness for the given dataset and predictions.
@@ -304,6 +338,8 @@ def main(
 
     print(f"Running SWEBench on dataset {dataset_name} with split {split}")
     assert len(run_id) > 0, "Run ID must be provided"
+
+    start_time = time.time()
 
     def get_gold_predictions(dataset_name: str, split: str):
         """
@@ -346,10 +382,28 @@ def main(
     if not dataset:
         print("No instances to run.")
     else:
-        results = asyncio.run(run_instances(predictions, dataset, run_id))
+        results = asyncio.run(run_instances(predictions, dataset, run_id, job_id))
 
     print("Running final report...")
-    return make_run_report(predictions, full_dataset, results, run_id)
+
+    report = make_run_report(predictions, full_dataset, results, run_id)
+    # Write report to Redis
+    redis = create_redis_client()
+    elapsed_time = time.time() - start_time
+    redis.set(
+        f"job:{job_id}",
+        json.dumps(
+            {
+                "status": "completed",
+                "report": report,
+                "progress": 100,
+                "start_time": start_time,
+                "elapsed_time": elapsed_time,
+            }
+        ),
+    )
+
+    return report
 
 
 class Prediction(BaseModel):
@@ -363,9 +417,8 @@ class EvaluationRequest(BaseModel):
     run_id: str
 
 
-@app.function(timeout=10 * 60)
-@modal.web_endpoint(method="POST")
-def run_evaluation(request: EvaluationRequest):
+@app.function(secrets=[modal.Secret.from_name("upstash")], timeout=10 * 60)
+def run_evaluation(job_id: str, request: EvaluationRequest):
     # Write preds to file
     timestamp = int(time.time())
     with open(f"preds_{request.run_id}_{timestamp}.json", "w") as f:
@@ -379,8 +432,35 @@ def run_evaluation(request: EvaluationRequest):
         instance_ids=None,
         predictions_path=f"preds_{request.run_id}_{timestamp}.json",
         run_id=request.run_id,
-        timeout=1800,
+        job_id=job_id,
     )
+
+
+@app.function(secrets=[modal.Secret.from_name("upstash")])
+@modal.web_endpoint(method="POST")
+def start_evaluation(request: EvaluationRequest):
+    from ulid import ULID
+
+    job_id = str(ULID())
+
+    redis = create_redis_client()
+    # Store initial job status
+    redis.set(f"job:{job_id}", json.dumps({"status": "queued", "progress": 0}))
+
+    # Start the evaluation process asynchronously
+    run_evaluation.spawn(job_id, request)
+
+    return {"job_id": job_id}
+
+
+@app.function(secrets=[modal.Secret.from_name("upstash")])
+@modal.web_endpoint(method="GET", docs=True)
+def get_job_status(job_id: str):
+    redis = create_redis_client()
+    status = redis.get(f"job:{job_id}")
+    if status is None:
+        return {"error": "Job not found"}
+    return json.loads(status)
 
 
 if __name__ == "__main__":
