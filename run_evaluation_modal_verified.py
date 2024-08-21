@@ -2,14 +2,25 @@ from __future__ import annotations
 
 import modal
 import json
+import time
 from pathlib import Path
 from argparse import ArgumentParser
 from typing import Optional
 from tqdm import tqdm
+from pydantic import BaseModel
 
 from modal_functions.swebench_verified import app as helper_app, dispatcher
 
-app = modal.App("swebench-evaluation")
+image = (
+    modal.Image.debian_slim(python_version="3.10")
+    .apt_install("git")
+    .pip_install("tqdm")
+    .pip_install("modal")
+    .pip_install("jsonlines")
+    .run_commands("pip install git+https://github.com/princeton-nlp/SWE-bench.git")
+)
+
+app = modal.App("swebench-evaluation-verified", image=image)
 app.include(helper_app)
 
 
@@ -270,7 +281,7 @@ def make_run_report(
     with open(report_file, "w") as f:
         print(json.dumps(report, indent=4), file=f)
     print(f"Report written to {report_file}")
-    return report_file
+    return report
 
 
 @app.local_entrypoint()
@@ -338,7 +349,38 @@ def main(
         results = asyncio.run(run_instances(predictions, dataset, run_id))
 
     print("Running final report...")
-    make_run_report(predictions, full_dataset, results, run_id)
+    return make_run_report(predictions, full_dataset, results, run_id)
+
+
+class Prediction(BaseModel):
+    model_name_or_path: str
+    instance_id: str
+    model_patch: str
+
+
+class EvaluationRequest(BaseModel):
+    predictions: list[Prediction]
+    run_id: str
+
+
+@app.function()
+@modal.web_endpoint(method="POST")
+def run_evaluation(request: EvaluationRequest):
+    # Write preds to file
+    timestamp = int(time.time())
+    with open(f"preds_{request.run_id}_{timestamp}.json", "w") as f:
+        # Convert Prediction objects to dictionaries
+        predictions_dict = [pred.dict() for pred in request.predictions]
+        json.dump(predictions_dict, f)
+
+    return main(
+        dataset_name="princeton-nlp/SWE-bench_Verified",
+        split="test",
+        instance_ids=None,
+        predictions_path=f"preds_{request.run_id}_{timestamp}.json",
+        run_id=request.run_id,
+        timeout=1800,
+    )
 
 
 if __name__ == "__main__":
