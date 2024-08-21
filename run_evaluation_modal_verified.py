@@ -363,7 +363,7 @@ class EvaluationRequest(BaseModel):
     run_id: str
 
 
-@app.function()
+@app.function(timeout=10 * 60)
 @modal.web_endpoint(method="POST")
 def run_evaluation(request: EvaluationRequest):
     # Write preds to file
