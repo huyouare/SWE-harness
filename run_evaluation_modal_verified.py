@@ -5,7 +5,7 @@ import json
 import time
 from pathlib import Path
 from argparse import ArgumentParser
-from typing import Optional
+from typing import Optional, TypedDict, List, Optional
 from tqdm import tqdm
 from pydantic import BaseModel
 import os
@@ -27,7 +27,39 @@ app = modal.App("swebench-evaluation-verified", image=image)
 app.include(helper_app)
 
 
-async def process_instance(instance, predictions, run_id):
+class SWEbenchInstance(TypedDict):
+    repo: str
+    instance_id: str
+    base_commit: str
+    patch: str
+    test_patch: str
+    problem_statement: str
+    hints_text: str
+    created_at: str
+    version: str
+    FAIL_TO_PASS: str
+    PASS_TO_PASS: str
+    environment_setup_commit: str
+
+
+class TestResult(TypedDict):
+    test_name: str
+    passed: bool
+    output: str
+
+
+class ModelPrediction(TypedDict):
+    model_name_or_path: str
+    model_patch: str
+
+
+class InstanceRecord(TypedDict):
+    test_input_instance: SWEbenchInstance  # Original SWEbenchInstance fields
+    model_prediction: ModelPrediction
+    report: Optional[dict]
+
+
+async def process_instance(instance: SWEbenchInstance, predictions: dict, run_id: str):
     from swebench.harness.grading import get_eval_report
     from swebench.harness.test_spec import make_test_spec
     from swebench.harness.constants import (
@@ -90,12 +122,24 @@ async def run_instances(predictions, instances, run_id, job_id):
     start_time = time.time()
     tasks = [process_instance(instance, predictions, run_id) for instance in instances]
     results = []
+    instance_records = []
     for task in tqdm(asyncio.as_completed(tasks), total=len(tasks)):
         try:
             result = await task
             print(f"Result: {result}")
             if result:
+                instance_id, report = result
                 results.append(result)
+                instance_records.append(
+                    {
+                        "instance_id": instance_id,
+                        "test_input_instance": next(
+                            i for i in instances if i["instance_id"] == instance_id
+                        ),
+                        "model_prediction": predictions[instance_id],
+                        "report": report,
+                    }
+                )
                 # Create report
                 report = make_run_report(predictions, instances, results, run_id)
                 # Write report to Redis
@@ -111,6 +155,7 @@ async def run_instances(predictions, instances, run_id, job_id):
                             "report": report,
                             "start_time": start_time,
                             "elapsed_time": elapsed_time,
+                            "instance_records": instance_records,
                         }
                     ),
                 )
@@ -123,7 +168,7 @@ async def run_instances(predictions, instances, run_id, job_id):
             import traceback
 
             print(traceback.format_exc())
-    return results
+    return results, instance_records
 
 
 def get_dataset_from_preds(
@@ -382,7 +427,9 @@ def main(
     if not dataset:
         print("No instances to run.")
     else:
-        results = asyncio.run(run_instances(predictions, dataset, run_id, job_id))
+        results, instance_records = asyncio.run(
+            run_instances(predictions, dataset, run_id, job_id)
+        )
 
     print("Running final report...")
 
@@ -399,6 +446,7 @@ def main(
                 "progress": 100,
                 "start_time": start_time,
                 "elapsed_time": elapsed_time,
+                "instance_records": instance_records,
             }
         ),
     )
