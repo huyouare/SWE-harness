@@ -142,7 +142,9 @@ async def run_instances(predictions, instances, run_id, job_id):
                 instance_records.append(instance_record)
 
                 # Store individual instance record in Redis
-                redis.set(f"job:{job_id}:instance:{instance_id}", instance_record)
+                redis.set(
+                    f"job:{job_id}:instance:{instance_id}", json.dumps(instance_record)
+                )
 
                 # Update job progress
                 progress = len(results) / len(tasks) * 100
@@ -517,39 +519,35 @@ def start_evaluation(request: EvaluationRequest):
 
 @app.function(secrets=[modal.Secret.from_name("upstash")])
 @modal.web_endpoint(method="GET", docs=True)
-def get_job_status(job_id: str, page: int = 1, page_size: int = 10):
+def get_job_status(job_id: str, instance_id: Optional[str] = None):
     redis = create_redis_client()
-    job_json = redis.get(f"job:{job_id}")
-    if job_json is None:
+    status_json = redis.get(f"job:{job_id}")
+    if status_json is None:
         return {"error": "Job not found"}
 
-    job_data = json.loads(job_json)
+    status = json.loads(status_json)
 
-    # Get the list of instance IDs
-    instance_ids = json.loads(redis.get(f"job:{job_id}:instance_ids") or "[]")
+    if instance_id:
+        # Fetch specific instance record
+        instance_record = redis.get(f"job:{job_id}:instance:{instance_id}")
+        if instance_record:
+            instance_data = json.loads(instance_record)
+        else:
+            instance_data = None
+    else:
+        instance_data = None
 
-    # Paginate instance IDs
-    start = (page - 1) * page_size
-    end = start + page_size
-    paginated_ids = instance_ids[start:end]
-
-    # Fetch paginated instance records
-    instance_records = []
-    for instance_id in paginated_ids:
-        record = redis.get(f"job:{job_id}:instance:{instance_id}")
-        if record:
-            instance_records.append(json.loads(record))
+    # Get the list of all instance IDs for this job
+    all_instance_ids = json.loads(redis.get(f"job:{job_id}:instance_ids") or "[]")
 
     return {
-        "status": job_data["status"],
-        "progress": job_data["progress"],
-        "start_time": job_data["start_time"],
-        "elapsed_time": job_data["elapsed_time"],
-        "report": job_data["report"],
-        "instance_records": instance_records,
-        "page": page,
-        "page_size": page_size,
-        "total_pages": (len(instance_ids) + page_size - 1) // page_size,
+        "status": status["status"],
+        "progress": status["progress"],
+        "start_time": status["start_time"],
+        "elapsed_time": status["elapsed_time"],
+        "report": status["report"],
+        "all_instance_ids": all_instance_ids,
+        "instance_record": instance_data,
     }
 
 
