@@ -118,6 +118,7 @@ def create_redis_client():
 
 async def run_instances(predictions, instances, run_id, job_id):
     import asyncio
+    from swebench.harness.utils import load_swebench_dataset
 
     start_time = time.time()
     tasks = [process_instance(instance, predictions, run_id) for instance in instances]
@@ -147,6 +148,12 @@ async def run_instances(predictions, instances, run_id, job_id):
                 )
 
                 # Update job progress
+                full_dataset = load_swebench_dataset(
+                    "princeton-nlp/SWE-bench_Lite", "test"
+                )
+                full_report = make_run_report(
+                    predictions, full_dataset, results, run_id
+                )
                 progress = len(results) / len(tasks) * 100
                 elapsed_time = time.time() - start_time
                 redis.set(
@@ -157,7 +164,7 @@ async def run_instances(predictions, instances, run_id, job_id):
                             "progress": progress,
                             "start_time": start_time,
                             "elapsed_time": elapsed_time,
-                            "report": report,
+                            "report": full_report,
                         }
                     ),
                 )
