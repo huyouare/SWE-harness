@@ -1,91 +1,73 @@
 from __future__ import annotations
 
-import json
-from argparse import ArgumentParser
-from pathlib import Path
-from typing import Optional
-
 import modal
-from pydantic import BaseModel
+import json
+import time
+from pathlib import Path
+from argparse import ArgumentParser
+from typing import Optional, TypedDict, List, Optional
 from tqdm import tqdm
+from pydantic import BaseModel
+import os
 
-from modal_functions.swebench_lite import app as helper_app
-from modal_functions.swebench_lite import dispatcher
+from modal_functions.swebench_lite import app as helper_app, dispatcher
 
-app = modal.App("swebench-evaluation")
-app.include(helper_app)
-
-
-endpoint_image = (
+image = (
     modal.Image.debian_slim(python_version="3.10")
     .apt_install("git")
     .pip_install("tqdm")
     .pip_install("modal")
     .pip_install("jsonlines")
-    .pip_install("pydantic")
+    .pip_install("redis")
+    .pip_install("python-ulid")
     .run_commands("pip install git+https://github.com/princeton-nlp/SWE-bench.git")
 )
 
-
-def pydantic_to_dict(model):
-    result = {}
-    for field in model.__fields__:
-        value = getattr(model, field)
-        if isinstance(value, BaseModel):
-            result[field] = pydantic_to_dict(value)
-        elif isinstance(value, list):
-            result[field] = [
-                pydantic_to_dict(item) if isinstance(item, BaseModel) else item
-                for item in value
-            ]
-        elif isinstance(value, dict):
-            result[field] = {
-                k: pydantic_to_dict(v) if isinstance(v, BaseModel) else v
-                for k, v in value.items()
-            }
-        else:
-            result[field] = value
-    return result
+app = modal.App("swebench-evaluation-lite", image=image)
+app.include(helper_app)
 
 
-class MejiPrediction(BaseModel):
-    model_name_or_path: str
+class SWEbenchInstance(TypedDict):
+    repo: str
     instance_id: str
+    base_commit: str
+    patch: str
+    test_patch: str
+    problem_statement: str
+    hints_text: str
+    created_at: str
+    version: str
+    FAIL_TO_PASS: str
+    PASS_TO_PASS: str
+    environment_setup_commit: str
+
+
+class TestResult(TypedDict):
+    test_name: str
+    passed: bool
+    output: str
+
+
+class ModelPrediction(TypedDict):
+    model_name_or_path: str
     model_patch: str
 
 
-class ProcessInstanceRequest(BaseModel):
-    instance_id: str
-    prediction: MejiPrediction
-    run_id: str
+class InstanceRecord(TypedDict):
+    test_input_instance: SWEbenchInstance  # Original SWEbenchInstance fields
+    model_prediction: ModelPrediction
+    report: Optional[dict]
 
 
-@app.function(image=endpoint_image)
-@modal.web_endpoint(method="POST")
-async def process_instance_endpoint(request: ProcessInstanceRequest):
-    """
-    Endpoint to process an instance.
-    """
-    prediction = {request.prediction.instance_id: pydantic_to_dict(request.prediction)}
-    instance = get_dataset_from_preds(
-        "princeton-nlp/SWE-bench_Lite",
-        "test",
-        [request.prediction.instance_id],
-        prediction,
-        request.run_id,
-        exclude_completed=False,
-    )[0]
-    return await process_instance(instance, prediction, request.run_id)
-
-
-async def process_instance(instance, predictions, run_id):
-    from swebench.harness.constants import RUN_EVALUATION_LOG_DIR
+async def process_instance(instance: SWEbenchInstance, predictions: dict, run_id: str):
     from swebench.harness.grading import get_eval_report
     from swebench.harness.test_spec import make_test_spec
+    from swebench.harness.constants import (
+        RUN_EVALUATION_LOG_DIR,
+    )
 
     test_spec = make_test_spec(instance)
     instance_id = test_spec.instance_id
-    print(predictions)
     pred = predictions[instance_id]
 
     instance_function = dispatcher(instance_id)
@@ -123,25 +105,77 @@ async def process_instance(instance, predictions, run_id):
         return None
 
 
-async def run_instances(predictions, instances, run_id):
+def create_redis_client():
+    from redis import Redis
+
+    return Redis(
+        host=os.environ["REDIS_HOST"],
+        port=os.environ["REDIS_PORT"],
+        password=os.environ["REDIS_PASSWORD"],
+        ssl=True,
+    )
+
+
+async def run_instances(predictions, instances, run_id, job_id):
     import asyncio
 
+    start_time = time.time()
     tasks = [process_instance(instance, predictions, run_id) for instance in instances]
     results = []
+    instance_records = []
+    redis = create_redis_client()
     for task in tqdm(asyncio.as_completed(tasks), total=len(tasks)):
         try:
             result = await task
             print(f"Result: {result}")
             if result:
+                instance_id, report = result
                 results.append(result)
+                instance_record = {
+                    "instance_id": instance_id,
+                    "test_input_instance": next(
+                        i for i in instances if i["instance_id"] == instance_id
+                    ),
+                    "model_prediction": predictions[instance_id],
+                    "report": report,
+                }
+                instance_records.append(instance_record)
+
+                # Store individual instance record in Redis
+                redis.set(
+                    f"job:{job_id}:instance:{instance_id}", json.dumps(instance_record)
+                )
+
+                # Update job progress
+                progress = len(results) / len(tasks) * 100
+                elapsed_time = time.time() - start_time
+                redis.set(
+                    f"job:{job_id}",
+                    json.dumps(
+                        {
+                            "status": "in_progress",
+                            "progress": progress,
+                            "start_time": start_time,
+                            "elapsed_time": elapsed_time,
+                            "report": report,
+                        }
+                    ),
+                )
+
         except asyncio.CancelledError:
             print("Task was cancelled")
         except Exception as e:
             print(f"An error occurred during task execution: {str(e)}")
-            # Optionally, you can log the full traceback
             import traceback
 
             print(traceback.format_exc())
+
+    # Store the list of instance IDs
+    redis.set(
+        f"job:{job_id}:instance_ids",
+        json.dumps([r["instance_id"] for r in instance_records]),
+    )
+
     return results
 
 
@@ -151,14 +185,17 @@ def get_dataset_from_preds(
     instance_ids: list,
     predictions: dict,
     run_id: str,
-    exclude_completed: bool = True,
+    exclude_completed: bool = False,
 ):
     """
     Return only instances that have predictions and are in the dataset.
     If instance_ids is provided, only return instances with those IDs.
     If exclude_completed is True, only return instances that have not been run yet.
     """
-    from swebench.harness.constants import KEY_INSTANCE_ID, RUN_EVALUATION_LOG_DIR
+    from swebench.harness.constants import (
+        KEY_INSTANCE_ID,
+        RUN_EVALUATION_LOG_DIR,
+    )
     from swebench.harness.utils import load_swebench_dataset
 
     # load dataset
@@ -250,7 +287,10 @@ def make_run_report(
     Returns:
         Path to report file
     """
-    from swebench.harness.constants import KEY_INSTANCE_ID, RUN_EVALUATION_LOG_DIR
+    from swebench.harness.constants import (
+        KEY_INSTANCE_ID,
+        RUN_EVALUATION_LOG_DIR,
+    )
 
     # instantiate sets to store IDs of different outcomes
     completed_ids = set()
@@ -328,7 +368,7 @@ def make_run_report(
     with open(report_file, "w") as f:
         print(json.dumps(report, indent=4), file=f)
     print(f"Report written to {report_file}")
-    return report_file
+    return report
 
 
 @app.local_entrypoint()
@@ -338,18 +378,21 @@ def main(
     instance_ids: Optional[str] = None,
     predictions_path: str = None,
     run_id: str = None,
-    timeout: int = 1800,
+    job_id: str = None,
 ):
     """
     Run evaluation harness for the given dataset and predictions.
     """
     import asyncio
-
-    from swebench.harness.constants import KEY_INSTANCE_ID
+    from swebench.harness.constants import (
+        KEY_INSTANCE_ID,
+    )
     from swebench.harness.utils import load_swebench_dataset
 
     print(f"Running SWEBench on dataset {dataset_name} with split {split}")
     assert len(run_id) > 0, "Run ID must be provided"
+
+    start_time = time.time()
 
     def get_gold_predictions(dataset_name: str, split: str):
         """
@@ -392,15 +435,89 @@ def main(
     if not dataset:
         print("No instances to run.")
     else:
-        results = asyncio.run(run_instances(predictions, dataset, run_id))
+        results = asyncio.run(run_instances(predictions, dataset, run_id, job_id))
 
     print("Running final report...")
-    make_run_report(predictions, full_dataset, results, run_id)
+
+    report = make_run_report(predictions, full_dataset, results, run_id)
+    # Write report to Redis
+    redis = create_redis_client()
+    elapsed_time = time.time() - start_time
+    redis.set(
+        f"job:{job_id}",
+        json.dumps(
+            {
+                "status": "completed",
+                "report": report,
+                "progress": 100,
+                "start_time": start_time,
+                "elapsed_time": elapsed_time,
+            }
+        ),
+    )
+
+    return report
+
+
+class Prediction(BaseModel):
+    model_name_or_path: str
+    instance_id: str
+    model_patch: str
+
+
+class EvaluationRequest(BaseModel):
+    predictions: list[Prediction]
+    run_id: str
+
+
+@app.function(secrets=[modal.Secret.from_name("upstash")], timeout=10 * 60)
+def run_evaluation(job_id: str, request: EvaluationRequest):
+    # Write preds to file
+    timestamp = int(time.time())
+    with open(f"preds_{request.run_id}_{timestamp}.json", "w") as f:
+        # Convert Prediction objects to dictionaries
+        predictions_dict = [pred.dict() for pred in request.predictions]
+        json.dump(predictions_dict, f)
+
+    return main(
+        dataset_name="princeton-nlp/SWE-bench_Lite",
+        split="test",
+        instance_ids=None,
+        predictions_path=f"preds_{request.run_id}_{timestamp}.json",
+        run_id=request.run_id,
+        job_id=job_id,
+    )
+
+
+@app.function(secrets=[modal.Secret.from_name("upstash")])
+@modal.web_endpoint(method="POST")
+def start_evaluation(request: EvaluationRequest):
+    from ulid import ULID
+
+    job_id = str(ULID())
+
+    redis = create_redis_client()
+    # Store initial job status
+    redis.set(
+        f"job:{job_id}",
+        json.dumps(
+            {
+                "status": "queued",
+                "progress": 0,
+                "start_time": time.time(),
+                "elapsed_time": 0,
+                "report": {},
+            }
+        ),
+    )
+
+    # Start the evaluation process asynchronously
+    run_evaluation.spawn(job_id, request)
+
+    return {"job_id": job_id}
 
 
 if __name__ == "__main__":
-    from swebench.harness.utils import str2bool
-
     parser = ArgumentParser()
     parser.add_argument(
         "--dataset_name",
