@@ -565,13 +565,152 @@ def get_job_status(job_id: str, instance_id: Optional[str] = None):
     }
 
 
+async def execute_instance(instance: SWEbenchInstance, predictions: dict, run_id: str):
+    from swebench.harness.grading import get_eval_report
+    from swebench.harness.test_spec import make_test_spec
+    from swebench.harness.constants import (
+        RUN_EVALUATION_LOG_DIR,
+        MAP_REPO_VERSION_TO_SPECS,
+    )
+
+    def make_exec_script_list(instance, specs, env_name, repo_directory, base_commit):
+        """
+        Applies the test patch and runs the tests.
+        """
+        import re
+        from swebench.harness.test_spec import (
+            DIFF_MODIFIED_FILE_REGEX,
+            MAP_REPO_VERSION_TO_SPECS,
+            get_test_directives,
+        )
+
+        HEREDOC_DELIMITER = "EOF_114329324912"
+        # test_files = re.findall(DIFF_MODIFIED_FILE_REGEX, test_patch)
+        # Reset test files to the state they should be in before the patch.
+        # reset_tests_command = f"git checkout {base_commit} {' '.join(test_files)}"
+        reset_tests_command = f"git checkout {base_commit}"
+        # apply_test_patch_command = (
+        #     f"git apply -v - <<'{HEREDOC_DELIMITER}'\n{test_patch}\n{HEREDOC_DELIMITER}"
+        # )
+        test_command = " ".join(
+            [
+                MAP_REPO_VERSION_TO_SPECS[instance["repo"]][instance["version"]][
+                    "test_cmd"
+                ],
+                # *get_test_directives(instance),
+            ]
+        )
+        eval_commands = [
+            f"source /opt/miniconda3/bin/activate",
+            f"conda activate {env_name}",
+            f"cd {repo_directory}",
+        ]
+        if "eval_commands" in specs:
+            eval_commands += specs["eval_commands"]
+        eval_commands += [
+            f"git config --global --add safe.directory {repo_directory}",  # for nonroot user
+            f"cd {repo_directory}",
+            # This is just informational, so we have a record
+            f"git status",
+            f"git show",
+            f"git diff {base_commit}",
+            "source /opt/miniconda3/bin/activate",
+            f"conda activate {env_name}",
+        ]
+        if "install" in specs:
+            eval_commands.append(specs["install"])
+        eval_commands += [
+            reset_tests_command,
+            test_command,
+            reset_tests_command,  # Revert tests after done, leave the repo in the same state as before
+        ]
+        return eval_commands
+
+    test_spec = make_test_spec(instance)
+    instance_id = test_spec.instance_id
+    pred = predictions[instance_id]
+
+    instance_function = dispatcher(instance_id)
+    if instance_function is None:
+        print(f"No function found for instance ID: {instance_id}")
+        return None
+
+    exec_script = make_exec_script_list(
+        instance,
+        MAP_REPO_VERSION_TO_SPECS[instance["repo"]][instance["version"]],
+        "testbed",
+        "/testbed",
+        instance["base_commit"],
+    )
+
+    def eval_script(exec_script):
+        return "\n".join(["#!/bin/bash", "set -uxo pipefail"] + exec_script) + "\n"
+
+    result = await instance_function.remote.aio(
+        pred["model_patch"], eval_script(exec_script)
+    )
+    print(f"Result for {instance_id}: {result}")
+
+    # Process the result
+    model_name_or_path = pred.get("model_name_or_path", "None").replace("/", "__")
+    log_dir = Path(
+        f"{RUN_EVALUATION_LOG_DIR}/{run_id}/{model_name_or_path}/{instance_id}"
+    )
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Decode the output if it's in bytes
+    output_str = (
+        result["output"].decode("utf-8")
+        if isinstance(result["output"], bytes)
+        else result["output"]
+    )
+
+    with open(log_dir / "test_output.txt", "w") as f:
+        f.write(output_str)
+
+    return result
+
+
+class ExecuteSingleInstanceRequest(BaseModel):
+    model_name_or_path: str
+    instance_id: str
+    model_patch: str
+
+
+@app.function(timeout=10 * 60)
+@modal.web_endpoint(method="POST")
+async def execute_single_instance(request: ExecuteSingleInstanceRequest):
+    """
+    Endpoint to process an instance.
+    """
+    prediction = {
+        request.instance_id: {
+            "model_name_or_path": request.model_name_or_path,
+            "model_patch": request.model_patch,
+            "instance_id": request.instance_id,
+        }
+    }
+
+    instance = get_dataset_from_preds(
+        "princeton-nlp/SWE-bench_Verified",
+        "test",
+        [request.instance_id],
+        prediction,
+        f"execute_single_{request.instance_id}",
+        exclude_completed=False,
+    )[0]
+    return await execute_instance(
+        instance, prediction, f"execute_single_{request.instance_id}"
+    )
+
+
 if __name__ == "__main__":
     from swebench.harness.utils import str2bool
 
     parser = ArgumentParser()
     parser.add_argument(
         "--dataset_name",
-        default="princeton-nlp/SWE-bench_Lite",
+        default="princeton-nlp/SWE-bench_Verified",
         type=str,
         help="Name of dataset or path to JSON file.",
     )
