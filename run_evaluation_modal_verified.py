@@ -87,8 +87,15 @@ async def process_instance(instance: SWEbenchInstance, predictions: dict, run_id
     )
     log_dir.mkdir(parents=True, exist_ok=True)
 
+    # Decode the output if it's in bytes
+    output_str = (
+        result["output"].decode("utf-8")
+        if isinstance(result["output"], bytes)
+        else result["output"]
+    )
+
     with open(log_dir / "test_output.txt", "w") as f:
-        f.write(result["output"])
+        f.write(output_str)
 
     if result["status"] == "success":
         report = get_eval_report(
